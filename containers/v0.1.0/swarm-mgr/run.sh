@@ -5,6 +5,7 @@ set -x
 export DOCKER_SWARM_SECRET=$(curl -s http://rancher-metadata.rancher.internal/2015-12-19/self/service/uuid)
 export SVC_INDEX=$(curl -s http://rancher-metadata.rancher.internal/2015-12-19/self/container/service_index)
 /giddyup service wait scale
+export LEADER_IP=$(/giddyup leader get agent_ip)
 
 join()
 {
@@ -17,26 +18,20 @@ join()
         sleep 1
     done
 
-    if [ "${SVC_INDEX}" -gt "2" ]; then
-        docker swarm join --secret ${DOCKER_SWARM_SECRET} $(docker -H tcp://$(/giddyup leader get):2375 node ls|grep Yes|awk '{print $3}'):2377
+    if [ "${SVC_INDEX}" -gt "3" ]; then
+        #docker swarm join --secret ${DOCKER_SWARM_SECRET} $(docker -H tcp://$(/giddyup leader get):2375 node ls|grep Yes|awk '{print $3}'):2377
+        docker swarm join --secret ${DOCKER_SWARM_SECRET} ${LEADER_IP}:2377
     else
-        docker swarm join --manager --secret ${DOCKER_SWARM_SECRET} $(docker -H tcp://$(/giddyup leader get):2375 node ls|grep Yes|awk '{print $3}'):2377
+        #docker swarm join --manager --secret ${DOCKER_SWARM_SECRET} $(docker -H tcp://$(/giddyup leader get):2375 node ls|grep Yes|awk '{print $3}'):2377
+        docker swarm join --manager --secret ${DOCKER_SWARM_SECRET} ${LEADER_IP}:2377
     fi
-}
-
-hangout()
-{
-    while true; do
-        sleep 3600
-    done
 }
 
 /giddyup leader check
 if [ "$?" -eq "0" ]; then
     docker swarm init --auto-accept worker --auto-accept manager --secret ${DOCKER_SWARM_SECRET} 
-    socat -d -d TCP-L:2375,fork UNIX:/var/run/docker.sock
 else
     join
-    hangout
 fi
 
+exec socat -d -d TCP-L:2375,fork UNIX:/var/run/docker.sock
