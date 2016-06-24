@@ -9,7 +9,6 @@ export LEADER_IP=$(/giddyup leader get agent_ip)
 
 join()
 {
-    LEADER_SOCKET=
     while true; do
         docker -H tcp://$(/giddyup leader get):2375 ps
         if [ "$?" -eq "0" ]; then
@@ -19,17 +18,18 @@ join()
     done
 
     if [ "${SVC_INDEX}" -gt "3" ]; then
-        #docker swarm join --secret ${DOCKER_SWARM_SECRET} $(docker -H tcp://$(/giddyup leader get):2375 node ls|grep Yes|awk '{print $3}'):2377
         docker swarm join --secret ${DOCKER_SWARM_SECRET} ${LEADER_IP}:2377
     else
-        #docker swarm join --manager --secret ${DOCKER_SWARM_SECRET} $(docker -H tcp://$(/giddyup leader get):2375 node ls|grep Yes|awk '{print $3}'):2377
         docker swarm join --manager --secret ${DOCKER_SWARM_SECRET} ${LEADER_IP}:2377
     fi
 }
 
 /giddyup leader check
 if [ "$?" -eq "0" ]; then
-    docker swarm init --auto-accept worker --auto-accept manager --secret ${DOCKER_SWARM_SECRET} 
+    docker swarm inspect
+    if [ "$?" -ne "0" ]; then
+        docker swarm init --auto-accept worker --auto-accept manager --secret ${DOCKER_SWARM_SECRET} 
+    fi
 else
     join
 fi
