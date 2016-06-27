@@ -7,3 +7,8 @@ swarm-mgr:
     tty: true
     labels:
         io.rancher.scheduler.global: true
+        io.rancher.sidekicks: healthcheck
+healthcheck:
+    net: "container:swarm-mgr"
+    image: cloudnautique/swarm-mgr:v0.2.0
+    command: /giddyup health -p 1492
