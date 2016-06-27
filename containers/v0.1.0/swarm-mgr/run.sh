@@ -24,10 +24,19 @@ join()
     fi
 }
 
-/giddyup leader check
-if [ "$?" -eq "0" ]; then
+swarm_exists()
+{
+    exists="false"
     docker swarm inspect
     if [ "$?" -ne "0" ]; then
+        exists="true"
+    fi
+    echo ${exists}
+}
+
+/giddyup leader check
+if [ "$?" -eq "0" ]; then
+    if [ "$(swarm_exists)" = "true" ]; then
         docker swarm init --auto-accept worker --auto-accept manager --secret ${DOCKER_SWARM_SECRET} 
     fi
 else
