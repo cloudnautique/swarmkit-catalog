@@ -1,4 +1,4 @@
-FROM docker:1.12.0-rc1
+FROM docker:1.12.0-rc2
 RUN apk add --update bash curl drill jq socat && \
     rm -rf /var/cache/apk/*
 ADD ./run.sh /run.sh

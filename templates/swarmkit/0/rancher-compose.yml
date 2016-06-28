@@ -4,7 +4,7 @@
   description: "Rancher Swarmkit service"
 swarm-mgr:
   health_check:
-    port: 1492
+    port: 1620
     interval: 2000
     unhealthy_threshold: 3
     strategy: recreate

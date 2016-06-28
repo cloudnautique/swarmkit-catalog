@@ -1,5 +1,5 @@
 swarm-mgr:
-    image: cloudnautique/swarm-mgr:v0.2.0
+    image: cloudnautique/swarm-mgr:v0.2.1-bill-4
     volumes:
         - /var/run/docker.sock:/var/run/docker.sock
     privileged: true
@@ -10,5 +10,5 @@ swarm-mgr:
         io.rancher.sidekicks: healthcheck
 healthcheck:
     net: "container:swarm-mgr"
-    image: cloudnautique/swarm-mgr:v0.2.0
-    command: /giddyup health -p 1492
+    image: cloudnautique/swarm-mgr:v0.2.1-bill-4
+    command: /giddyup health 
