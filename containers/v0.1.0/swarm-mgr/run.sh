@@ -2,36 +2,123 @@
 
 set -x
 
-export DOCKER_SWARM_SECRET=$(curl -s http://rancher-metadata.rancher.internal/2015-12-19/self/service/uuid)
-export SVC_INDEX=$(curl -s http://rancher-metadata.rancher.internal/2015-12-19/self/container/service_index)
+export META_URL="http://rancher-metadata.rancher.internal/2015-12-19"
+export DOCKER_SWARM_SECRET=$(curl -s ${META_URL}/self/service/uuid)
 /giddyup service wait scale
-export LEADER_IP=$(/giddyup leader get agent_ip)
 
-join()
+container_ip()
 {
-    while true; do
-        docker -H tcp://$(/giddyup leader get):2375 ps
-        if [ "$?" -eq "0" ]; then
-            break
-        fi
-        sleep 1
-    done
+    IP=$(curl -s -H 'Accept: application/json' ${META_URL}/self/service/containers/${1}|jq -r .primary_ip)
+    echo ${IP}
+}
 
-    if [ "${SVC_INDEX}" -gt "3" ]; then
-        docker swarm join --secret ${DOCKER_SWARM_SECRET} ${LEADER_IP}:2377
-    else
-        docker swarm join --manager --secret ${DOCKER_SWARM_SECRET} ${LEADER_IP}:2377
+is_swarm_member()
+{
+    active=false
+    if docker -H tcp://${1}:2375 info 2>&1|grep Swarm\:\ active > /dev/null ; then
+        active="true"
+    fi
+
+    echo ${active}
+}
+
+get_manager_agent_ip()
+{
+    for container in $(/giddyup service containers -n); do
+        ip=$(container_ip $container)
+        
+        if [ "$(is_swarm_manager ${ip})" = "true"  ]; then
+            UUID=$(curl -s -H 'Accept: application/json' ${META_URL}/self/service/containers/${container}|jq -r '.host_uuid')
+    		IP=$(curl -s -H 'Accept: application/json' ${META_URL}/hosts |jq -r ".[] | select(.uuid==\"${UUID}\") | .agent_ip")
+    		echo ${IP}
+            return 
+        fi
+    done
+}
+
+get_manager_ip()
+{
+    for container in $(/giddyup service containers -n); do
+        svc_index="$(curl -s -H 'Accept: application/json' ${META_URL}/self/service/containers/${container} | jq -r '.service_index')"
+        ip=$(container_ip $container)
+
+        if [ "$(is_swarm_manager ${ip})" = "true"  ]; then
+            echo "${ip}"
+            return 
+        fi
+    done
+}
+
+demote_node()
+{
+    mgr_ip=$(get_manager_ip)
+    if [ ! -z ${mgr_ip} ]; then
+        docker -H tcp://${mgr_ip}:2375 node demote ${1}
     fi
 }
 
-/giddyup leader check
-if [ "$?" -eq "0" ]; then
-    docker swarm inspect
-    if [ "$?" -ne "0" ]; then
-        docker swarm init --auto-accept worker --auto-accept manager --secret ${DOCKER_SWARM_SECRET} 
+promote_node()
+{
+    mgr_ip=$(get_manager_ip)
+    if [ ! -z ${mgr_ip} ]; then
+        docker -H tcp://${mgr_ip}:2375 node promote ${1}
     fi
-else
-    join
-fi
+}
 
-exec socat -d -d TCP-L:2375,fork UNIX:/var/run/docker.sock
+get_swarm_node_id()
+{
+    echo $(docker -H tcp://${1}:2375 info 2>&1|grep NodeID|cut -d':' -f2|tr -d '[[:space:]]')
+}
+
+is_swarm_manager()
+{
+    manager=false
+    if docker -H tcp://${1}:2375 info 2>&1|grep IsManager\:\ Yes > /dev/null ; then
+        manager="true"
+    fi
+
+    echo ${manager}
+}
+
+add_worker()
+{
+    LEADER_IP=$(get_manager_agent_ip)
+    if [ "$(is_swarm_member ${1})" = "true" ] && [ "$(is_swarm_manager ${1})" = "true" ]; then 
+            demote_node $(get_swarm_node_id ${1})
+    fi
+
+    if [ "$(is_swarm_member ${1})" = "false" ]; then
+       docker -H tcp://${1}:2375 swarm join --secret ${DOCKER_SWARM_SECRET} ${LEADER_IP}:2377
+    fi
+}
+
+add_manager()
+{
+    LEADER_IP=$(get_manager_agent_ip)
+    if [ "$(is_swarm_member ${1})" = "true" ] && [ "$(is_swarm_manager ${1})" = "false" ]; then 
+            promote_node $(get_swarm_node_id ${1})
+    fi
+
+    if [ "$(is_swarm_member ${1})" = "false" ];then
+        docker -H tcp://${1}:2375 swarm join --manager --secret ${DOCKER_SWARM_SECRET} ${LEADER_IP}:2377
+    fi
+}
+
+while true; do
+    if /giddyup leader check ; then
+        if [ "$(is_swarm_member $(/giddyup leader get))" = "false" ]; then
+            docker swarm init --auto-accept worker --auto-accept manager --secret ${DOCKER_SWARM_SECRET} 
+        fi
+   
+        # reconcile_state
+        for container in $(/giddyup service containers -n); do
+            svc_index="$(curl -s -H 'Accept: application/json' ${META_URL}/self/service/containers/${container} | jq -r '.service_index')"
+            if [ "${svc_index}" -le "3" ]; then 
+                add_manager  $(container_ip $container)
+            else
+                add_worker $(container_ip $container)
+            fi     
+        done
+    fi
+    sleep 60
+done
