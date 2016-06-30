@@ -1,5 +1,5 @@
 swarm-mgr:
-    image: cloudnautique/swarm-mgr:v0.2.1-bill-4
+    image: cloudnautique/swarm-mgr:v0.2.1-bill-19
     volumes:
         - /var/run/docker.sock:/var/run/docker.sock
     privileged: true
@@ -7,8 +7,17 @@ swarm-mgr:
     tty: true
     labels:
         io.rancher.scheduler.global: true
-        io.rancher.sidekicks: healthcheck
+        io.rancher.sidekicks: healthcheck,docker-socket
+docker-socket:
+    image: cloudnautique/swarm-mgr:v0.2.1-bill-19
+    net: "container:swarm-mgr"
+    volumes:
+        - /var/run/docker.sock:/var/run/docker.sock
+    privileged: true
+    stdin_open: true
+    tty: true
+    command: /socat.sh
 healthcheck:
     net: "container:swarm-mgr"
-    image: cloudnautique/swarm-mgr:v0.2.1-bill-4
+    image: cloudnautique/swarm-mgr:v0.2.1-bill-19
     command: /giddyup health 
