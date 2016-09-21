@@ -1,0 +1,25 @@
+#!/bin/bash -e
+
+ACCT=${ACCT:-llparse}
+VERSION=${VERSION:-v1.12.0}
+IMAGE=${IMAGE:-swarmkit}
+
+# Build swarmkit from source
+docker build \
+  -t $ACCT/$IMAGE.build:$VERSION \
+  -f Dockerfile.build \
+    .
+
+# Copy binaries to host folder
+docker run \
+  -v $(pwd):/go/src/github.com/docker/swarmkit/out \
+  --entrypoint=/bin/cp \
+    $ACCT/$IMAGE.build:$VERSION \
+      bin/swarmd bin/swarmctl out/
+
+# Build/Push swarmkit binary image
+docker build -t $ACCT/$IMAGE:$VERSION .
+docker push $ACCT/$IMAGE:$VERSION
+
+# Cleanup
+rm -f swarmd swarmctl
