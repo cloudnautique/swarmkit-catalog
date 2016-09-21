@@ -3,5 +3,7 @@ swarm-node:
   labels:
     io.rancher.container.pull_image: always
     io.rancher.scheduler.global: 'true'
+  environment:
+    SWARM_SOCKET: /var/run/swarm.sock
   volumes:
   - /var/run/docker.sock:/var/run/docker.sock
