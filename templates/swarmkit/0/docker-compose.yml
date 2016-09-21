@@ -1,5 +1,6 @@
 swarm-node:
   image: llparse/swarmkit:v1.12.0
+  command: rancher_node
   labels:
     io.rancher.container.pull_image: always
     io.rancher.scheduler.global: 'true'
