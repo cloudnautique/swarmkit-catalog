@@ -2,7 +2,7 @@
 
 ACCT=${ACCT:-llparse}
 VERSION=${VERSION:-v1.12.0}
-IMAGE=${IMAGE:-swarmkit}
+IMAGE=${IMAGE:-swarmkit-standalone}
 
 # Build swarmkit from source
 docker build \

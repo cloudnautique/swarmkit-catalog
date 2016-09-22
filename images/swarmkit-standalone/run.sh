@@ -53,8 +53,13 @@ standalone_node() {
 
 runtime_node() {
   # TODO: add host label swarm:worker
+
   JOIN_ADDR=$(giddyup leader get):4242
-  JOIN_TOKEN=wat
+  JOIN_TOKEN="Not found"
+  while [ "$JOIN_TOKEN" == "Not found" ]; do
+    JOIN_TOKEN=$(curl -s $META_URL/self/service/metadata/Worker)
+    sleep 1
+  done
 
   swarmd \
     --election-tick $SWARM_ELECTION_TICK \

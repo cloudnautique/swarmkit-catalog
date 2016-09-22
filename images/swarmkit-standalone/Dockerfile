@@ -1,4 +1,4 @@
-FROM alpine:3.4
+FROM docker:1.12.0
 
  RUN \
   apk add --update --no-cache curl jq && \
