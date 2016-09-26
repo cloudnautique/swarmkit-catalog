@@ -1,0 +1,8 @@
+#!/bin/bash -e
+
+ACCT=${ACCT:-llparse}
+VERSION=${VERSION:-v1.12}
+IMAGE=${IMAGE:-swarmkit}
+
+docker build -t $ACCT/$IMAGE:$VERSION .
+docker push $ACCT/$IMAGE:$VERSION

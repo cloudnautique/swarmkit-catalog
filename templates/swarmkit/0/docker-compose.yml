@@ -1,0 +1,20 @@
+swarm-mgr:
+  image: llparse/swarmkit:v1.12
+  labels:
+    io.rancher.container.pull_image: always
+    io.rancher.scheduler.global: true
+    io.rancher.sidekicks: healthcheck,docker-socket
+  privileged: true
+  volumes:
+  - /var/run/docker.sock:/var/run/docker.sock
+docker-socket:
+  image: llparse/swarmkit:v1.12
+  net: container:swarm-mgr
+  volumes:
+  - /var/run/docker.sock:/var/run/docker.sock
+  privileged: true
+  command: "socat -d -d TCP-L:2375,fork UNIX:/var/run/docker.sock"
+healthcheck:
+  image: llparse/swarmkit:v1.12
+  command: giddyup health 
+  net: container:swarm-mgr
