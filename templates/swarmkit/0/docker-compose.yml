@@ -1,6 +1,8 @@
 swarm-mgr:
   image: llparse/swarmkit:v1.12
   labels:
+    io.rancher.container.agent.role: environment
+    io.rancher.container.create_agent: 'true'
     io.rancher.container.dns: "true"
     io.rancher.container.pull_image: always
     io.rancher.scheduler.global: true

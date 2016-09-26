@@ -3,6 +3,9 @@
 export META_URL="http://rancher-metadata.rancher.internal/2015-12-19"
 giddyup service wait scale
 
+SERVICE_NAME=swarm-mgr
+AGENT_IP=$(curl -s ${META_URL}/self/host/agent_ip)
+SERVICE_UUID=$(curl -s $META_URL/services/${SERVICE_NAME}/uuid)
 container_ip()       { curl -s ${META_URL}/self/service/containers/${1}/primary_ip    }
 container_svc_idx()  { curl -s ${META_URL}/self/service/containers/${1}/service_index }
 container_hostname() { curl -s ${META_URL}/self/service/containers/${1}/hostname      }
@@ -109,6 +112,28 @@ add_worker()
     fi
 }
 
+publish_tokens() {
+  giddyup probe tcp://$AGENT_IP:2377 --loop --min 1s --max 5s --backoff 1.4
+
+  SERVICE_DATA=$(curl -s -u $CATTLE_ACCESS_KEY:$CATTLE_SECRET_KEY "${CATTLE_URL}/services?uuid=${SERVICE_UUID}")
+  PROJECT_ID=$(echo $SERVICE_DATA | jq -r '.data[0].accountId')
+  SERVICE_ID=$(echo $SERVICE_DATA | jq -r '.data[0].id')
+  SERVICE_DATA=$(curl -s -u $CATTLE_ACCESS_KEY:$CATTLE_SECRET_KEY "${CATTLE_URL}/projects/${PROJECT_ID}/services/${SERVICE_ID}")
+
+  for type in worker manager; do
+    token=$(docker swarm join-token $type -q)
+    SERVICE_DATA=$(echo $SERVICE_DATA | jq -r ".metadata |= .+ {\"$type\":\"$token\"}")
+  done
+
+  curl -s -X PUT \
+    -u "${CATTLE_ACCESS_KEY}:${CATTLE_SECRET_KEY}" \
+    -H 'Accept: application/json' \
+    -H 'Content-Type: application/json' \
+    -d "${SERVICE_DATA}" \
+    "${CATTLE_URL}/projects/$PROJECT_ID/services/${SERVICE_ID}"
+}
+
+
 add_manager()
 {
     LEADER_DOCKER_IP=$(get_manager_ip)
@@ -127,7 +152,12 @@ while true; do
     # Bootstrap a new 1-node manager cluster
     if [ "$(local_node_state)" = "inactive" ]; then
       # CATTLE_AGENT_IP will be the private IP in properly configured environments
-      docker swarm init --advertise-addr $(curl -s $META_URL/self/host/agent_ip):2377
+      docker swarm init --advertise-addr $AGENT_IP:2377
+
+      publish_tokens
+      # publish registration tokens to metadata (can use vault later)
+      docker swarm join-token manager -q
+      docker swarm join-token worker -q
     fi
    
     # reconcile_state
