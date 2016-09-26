@@ -1,9 +1,11 @@
 swarm-mgr:
   image: llparse/swarmkit:v1.12
   labels:
+    io.rancher.container.dns: "true"
     io.rancher.container.pull_image: always
     io.rancher.scheduler.global: true
     io.rancher.sidekicks: healthcheck,docker-socket
+  net: host
   privileged: true
   volumes:
   - /var/run/docker.sock:/var/run/docker.sock

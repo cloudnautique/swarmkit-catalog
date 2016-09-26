@@ -3,11 +3,9 @@
 export META_URL="http://rancher-metadata.rancher.internal/2015-12-19"
 giddyup service wait scale
 
-container_ip()
-{
-    IP=$(curl -s -H 'Accept: application/json' ${META_URL}/self/service/containers/${1}|jq -r .primary_ip)
-    echo ${IP}
-}
+container_ip()       { curl -s ${META_URL}/self/service/containers/${1}/primary_ip    }
+container_svc_idx()  { curl -s ${META_URL}/self/service/containers/${1}/service_index }
+container_hostname() { curl -s ${META_URL}/self/service/containers/${1}/hostname      }
 
 is_swarm_manager()
 {
@@ -18,14 +16,15 @@ is_swarm_manager()
 
     echo ${active}
 }
-is_swarm_member()
-{
-    active=false
-    if docker -H tcp://${1}:2375 info 2>&1|grep Swarm\:\ active > /dev/null ; then
-        active="true"
-    fi
 
-    echo ${active}
+# returns: 'active' or 'inactive'
+local_node_state() {
+  node_state localhost
+}
+
+node_state()
+{
+  echo $(curl -s http://${1}:2375/info | jq -r .Swarm.LocalNodeState)
 }
 
 get_manager_swarm_ip()
@@ -101,11 +100,11 @@ add_worker()
 {
     LEADER_DOCKER_IP=$(get_manager_ip)
     LEADER_IP=$(get_manager_swarm_ip ${LEADER_DOCKER_IP})
-    if [ "$(is_swarm_member ${1})" = "true" ] && [ "$(is_swarm_manager ${1})" = "true" ]; then 
+    if [ "$(node_state ${1})" = "active" ] && [ "$(is_swarm_manager ${1})" = "true" ]; then 
             demote_node $(get_swarm_node_id ${1})
     fi
 
-    if [ "$(is_swarm_member ${1})" = "false" ]; then
+    if [ "$(node_state ${1})" = "inactive" ]; then
         docker -H tcp://${1}:2375 swarm join --token $(worker_secret) ${LEADER_IP}:2377
     fi
 }
@@ -114,31 +113,32 @@ add_manager()
 {
     LEADER_DOCKER_IP=$(get_manager_ip)
     LEADER_IP=$(get_manager_swarm_ip ${LEADER_DOCKER_IP})
-    if [ "$(is_swarm_member ${1})" = "true" ] && [ "$(is_swarm_manager ${1})" = "false" ]; then 
+    if [ "$(node_state ${1})" = "active" ] && [ "$(is_swarm_manager ${1})" = "false" ]; then 
             promote_node $(get_swarm_node_id ${1})
     fi
 
-    if [ "$(is_swarm_member ${1})" = "false" ];then
+    if [ "$(node_state ${1})" = "inactive" ];then
         docker -H tcp://${1}:2375 swarm join --token $(manager_secret) ${LEADER_IP}:2377
     fi
 }
 
 while true; do
-    if giddyup leader check ; then
-        if [ "$(is_swarm_member $(giddyup leader get))" = "false" ]; then
-            # Eth0... hmm... 
-            docker swarm init --advertise-addr eth0
-        fi
-   
-        # reconcile_state
-        for container in $(giddyup service containers -n); do
-            svc_index="$(curl -s -H 'Accept: application/json' ${META_URL}/self/service/containers/${container} | jq -r '.service_index')"
-            if [ "${svc_index}" -le "3" ]; then 
-                add_manager  $(container_ip $container)
-            else
-                add_worker $(container_ip $container)
-            fi     
-        done
+  if giddyup leader check; then
+    # Bootstrap a new 1-node manager cluster
+    if [ "$(local_node_state)" = "inactive" ]; then
+      # CATTLE_AGENT_IP will be the private IP in properly configured environments
+      docker swarm init --advertise-addr $(curl -s $META_URL/self/host/agent_ip):2377
     fi
-    sleep 60
+   
+    # reconcile_state
+    for c in $(giddyup service containers -n); do
+      svc_idx=$(container_svc_idx $c)
+      if [ "${svc_idx}" -le "3" ]; then 
+        add_manager $(container_ip $c)
+      else
+        add_worker $(container_ip $c)
+      fi     
+    done
+  fi
+  sleep 60
 done
