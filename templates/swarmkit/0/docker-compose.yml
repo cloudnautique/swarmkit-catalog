@@ -6,20 +6,27 @@ swarm-mgr:
     io.rancher.container.dns: 'true'
     io.rancher.container.pull_image: always
     io.rancher.scheduler.affinity:host_label: io.rancher.host.docker_version=1.12
-    io.rancher.scheduler.global: true
-    io.rancher.sidekicks: healthcheck,docker-socket
+    io.rancher.scheduler.global: 'true'
+    io.rancher.sidekicks: healthcheck
   net: host
+  ports:
+  - 2377:2377/tcp
+  - 2378:2378/tcp
   privileged: true
   volumes:
   - /var/run/docker.sock:/var/run/docker.sock
-docker-socket:
-  image: llparse/swarmkit:v1.12
-  net: container:swarm-mgr
-  volumes:
-  - /var/run/docker.sock:/var/run/docker.sock
-  privileged: true
-  command: "socat -d -d TCP-L:2375,fork UNIX:/var/run/docker.sock"
 healthcheck:
   image: llparse/swarmkit:v1.12
-  command: giddyup health 
+  command: giddyup health -p 2378
+  labels:
+    io.rancher.container.pull_image: always
   net: container:swarm-mgr
+docker-socket:
+  image: llparse/swarmkit:v1.12
+  command: "socat -d -d TCP-L:2375,fork UNIX:/var/run/docker.sock"
+  labels:
+    io.rancher.container.pull_image: always
+    io.rancher.scheduler.affinity:host_label: io.rancher.host.docker_version=1.12
+    io.rancher.scheduler.global: 'true'
+  volumes:
+  - /var/run/docker.sock:/var/run/docker.sock

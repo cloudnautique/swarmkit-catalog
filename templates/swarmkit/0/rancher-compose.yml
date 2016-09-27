@@ -3,7 +3,14 @@
 swarm-mgr:
   health_check:
     request_line: GET /ping HTTP/1.0
-    port: 1620
+    port: 2378
+    interval: 5000
+    response_timeout: 3000
+    healthy_threshold: 1
+    unhealthy_threshold: 2
+docker-socket:
+  health_check:
+    port: 2375
     interval: 5000
     response_timeout: 3000
     healthy_threshold: 1

@@ -7,4 +7,4 @@ version=$(docker version|grep Version|head -n1|cut -d: -f2|tr -d '[[:space:]]')
 ln -fs /usr/bin/docker-$version /usr/bin/docker
 
 # Run appropriate script
-exec /run_$version.sh
+exec /opt/rancher/run_$version.sh
