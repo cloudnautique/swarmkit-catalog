@@ -1,7 +1,7 @@
 FROM alpine:3.4
 
 RUN \
-  apk add --update --no-cache curl jq bash socat && \
+  apk add --update --no-cache curl jq bash && \
   curl -sfL -o /usr/bin/giddyup https://github.com/cloudnautique/giddyup/releases/download/v0.14.0/giddyup && \
   chmod +x /usr/bin/giddyup
 

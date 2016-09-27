@@ -1,7 +1,13 @@
 #!/bin/bash -x
 
+# Facts:
+# 1. The leader (lowest create_index) is always a manager
+# 2. Host labels are merely a visual aid (and useful for simple debugging)
+
 META_URL="http://rancher-metadata.rancher.internal/2015-12-19"
 SERVICE_NAME="swarm-mgr"
+
+# This may be tuned for extra resilience - user should register at least this number of hosts
 MANAGER_SCALE=3
 
 AGENT_IP=$(curl -s ${META_URL}/self/host/agent_ip)
@@ -65,68 +71,6 @@ get_swarm_node_id()  { echo $(curl -s --unix-socket /var/run/docker.sock http::/
 get_swarm_managers() { echo $(curl -s --unix-socket /var/run/docker.sock http::/info | jq -r .Swarm.Managers);         }
 get_swarm_workers()  { echo $(curl -s --unix-socket /var/run/docker.sock http::/info | jq -r .Swarm.Workers);          }
 
-
-#get_manager_swarm_ip() {
-#    echo $(docker swarm join-token worker | tail -1 | awk '{gsub(/^[ \t]+/,"",$0); split($0,a,":"); print a[1]}')
-    # for container in $(giddyup service containers -n); do
-        # ip=$(container_ip $container)
-        # 
-        # if [ "$(is_swarm_manager ${ip})" = "true"  ]; then
-            # UUID=$(curl -s -H 'Accept: application/json' ${META_URL}/self/service/containers/${container}|jq -r '.host_uuid')
-        # IP=$(curl -s -H 'Accept: application/json' ${META_URL}/hosts |jq -r ".[] | select(.uuid==\"${UUID}\") | .agent_ip")
-        # echo ${IP}
-            # return 
-        # fi
-    # done
-#}
-
-#get_manager_ip() {
-#    for container in $(giddyup service containers -n); do
-#        svc_index="$(curl -s -H 'Accept: application/json' ${META_URL}/self/service/containers/${container} | jq -r '.service_index')"
-#        ip=$(container_ip $container)
-
-#        if [ "$(is_swarm_manager ${ip})" = "true"  ]; then
-#            echo "${ip}"
-#            return 
-#        fi
-#    done
-#}
-
-#demote_node() {
-#    mgr_ip=$(get_manager_ip)
-#    if [ ! -z ${mgr_ip} ]; then
-#        docker -H tcp://${mgr_ip}:2375 node demote ${1}
-#    fi
-#}
-
-promote_node() {
-  docker node promote $(get_swarm_node_id)
-}
-
-#add_worker() {
-#    LEADER_DOCKER_IP=$(get_manager_ip)
-#    LEADER_IP=$(get_manager_swarm_ip ${LEADER_DOCKER_IP})
-#    if [ "$(node_state ${1})" = "active" ] && [ "$(is_swarm_manager ${1})" = "true" ]; then 
-#            demote_node $(get_swarm_node_id ${1})
-#    fi
-
-#    if [ "$(node_state ${1})" = "inactive" ]; then
-#        docker -H tcp://${1}:2375 swarm join --token $(worker_token) ${LEADER_IP}:2377
-#    fi
-#}
-
-#add_manager() {
-#    LEADER_DOCKER_IP=$(get_manager_ip)
-#    LEADER_IP=$(get_manager_swarm_ip ${LEADER_DOCKER_IP})
-#    if [ "$(node_state ${1})" = "active" ] && [ "$(is_swarm_manager ${1})" = "false" ]; then 
-#            promote_node $(get_swarm_node_id ${1})
-#    fi
-#
-#    if [ "$(node_state ${1})" = "inactive" ]; then
-#        docker -H tcp://${1}:2375 swarm join --token $(manager_token) ${LEADER_IP}:2377
-#    fi
-#}
-
 publish_tokens() {
   SERVICE_DATA=$(curl -s -u $CATTLE_ACCESS_KEY:$CATTLE_SECRET_KEY "${CATTLE_URL}/services?uuid=${SERVICE_UUID}")
   PROJECT_ID=$(echo $SERVICE_DATA | jq -r '.data[0].accountId')
@@ -172,17 +116,47 @@ publish_label() {
   # TODO validate that the write succeeded, retry if necessary
 }
 
+# promote/demote/delete nodes as necessary
 reconcile_node() {
-  
-  if [ "$(get_swarm_managers)" -lt "$MANAGER_SCALE" ] && [ "$(get_swarm_workers)" -ge "$MANAGER_SCALE" ]; then
-    echo "TODO: find a worker and promote it"
-  
-  elif [ "$(get_swarm_managers)" -gt "$MANAGER_SCALE" ]; then
-    echo "TODO: find a dead manager and remove it -or- find a manager and demote it"
+  # get current view of swarm nodes
+  nodes=$(curl -s --unix-socket /var/run/docker.sock http::/nodes)
+
+  # filter nodes based on healthy/role
+  reachable_manager_nodes=$(echo $nodes | jq 'map(select(.Spec.Role == "manager")) | map(select(.ManagerStatus.Reachability == "reachable"))')
+  unreachable_manager_nodes=$(echo $nodes | jq 'map(select(.Spec.Role == "manager")) | map(select(.ManagerStatus.Reachability == "unreachable"))')
+  # ignore dead workers
+  active_worker_nodes=$(echo $nodes | jq 'map(select(.Spec.Role == "worker")) | map(select(.Spec.Availability == "active"))')
+
+  # count all nodes
+  manager_reachable_count=$(echo $reachable_manager_nodes | jq length)
+  manager_unreachable_count=$(echo $unreachable_manager_nodes | jq length)
+  worker_node_count=$(echo $active_worker_nodes | jq length)
+
+  # conditions for not performing reconciliation
+  if [ "$manager_unreachable_count" -eq "0" ]; then
+    echo "All $manager_reachable_count managers reachable."
+    return
+  elif [ "$manager_reachable_count" -le "$manager_unreachable_count" ]; then
+    echo "Disaster scenario! Manual intervention required."
+    return
+  elif [ "$worker_node_count" -eq "0" ]; then
+    echo "No workers present for promotion, add more nodes to restore resiliency."
+    return
   fi
+
+  echo "Detected $manager_reachable_count reachable and $manager_unreachable_count unreachable managers, $worker_node_count workers. Reconciling."
+
+  # TODO choose the worker with lowest Rancher create_index to ensure leader is always a manager
+  manager_id=$(echo $unreachable_manager_nodes | jq -r .[0].ID)
+  worker_id=$(echo $active_worker_nodes | jq -r .[0].ID)
+
+  # TODO promoted node should fix his host label
+  docker node promote $worker_id
+  docker node demote $manager_id
+  docker node rm $manager_id
 }
 
-standalone_node() {
+bootstrap_node() {
   # CATTLE_AGENT_IP will be the private IP in properly configured environments
   docker swarm init \
     --advertise-addr $AGENT_IP:2377
@@ -231,14 +205,11 @@ node() {
   elif [ "$(get_leader)" == "$AGENT_IP" ]; then
 
     # Bootstrap a new 1-node manager cluster
-    if [ "$(local_node_state)" != "active" ]; then
-      standalone_node
-
-    # Perform reconciliation
+    if [ "$(local_node_state)" == "inactive" ]; then
+      bootstrap_node
     else
       reconcile_node
     fi
-
   # Scale up
   else
     runtime_node

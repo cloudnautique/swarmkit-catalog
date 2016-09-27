@@ -1,4 +1,4 @@
-swarm-mgr:
+swarmkit-mon:
   image: llparse/swarmkit:v1.12
   labels:
     io.rancher.container.agent.role: environment
@@ -20,13 +20,4 @@ healthcheck:
   command: giddyup health -p 2378
   labels:
     io.rancher.container.pull_image: always
-  net: container:swarm-mgr
-docker-socket:
-  image: llparse/swarmkit:v1.12
-  command: "socat -d -d TCP-L:2375,fork UNIX:/var/run/docker.sock"
-  labels:
-    io.rancher.container.pull_image: always
-    io.rancher.scheduler.affinity:host_label: io.rancher.host.docker_version=1.12
-    io.rancher.scheduler.global: 'true'
-  volumes:
-  - /var/run/docker.sock:/var/run/docker.sock
+  net: container:swarmkit-mon
