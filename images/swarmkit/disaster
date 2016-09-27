@@ -1,0 +1,5 @@
+#!/bin/bash -e
+
+touch /dr
+
+echo -e "Disaster flag set. Recovery will occur during the next reconciliation.\n\nYou may now close the shell.

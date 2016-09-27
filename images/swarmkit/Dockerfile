@@ -15,6 +15,8 @@ RUN \
   rm -rf docker/ && \
   ln -fs /usr/bin/docker-1.12.1 /usr/bin/docker
 
-ADD run.sh run_1.12.0.sh run_1.12.1.sh /
+WORKDIR /opt/rancher
+ENV PATH $PATH:/opt/rancher
+ADD run.sh run_1.12.0.sh run_1.12.1.sh disaster /opt/rancher
 
 CMD ["/run.sh"]
