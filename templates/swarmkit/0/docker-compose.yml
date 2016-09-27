@@ -7,17 +7,7 @@ swarmkit-mon:
     io.rancher.container.pull_image: always
     io.rancher.scheduler.affinity:host_label: io.rancher.host.docker_version=1.12
     io.rancher.scheduler.global: 'true'
-    io.rancher.sidekicks: healthcheck
   net: host
-  ports:
-  - 2377:2377/tcp
-  - 2378:2378/tcp
   privileged: true
   volumes:
   - /var/run/docker.sock:/var/run/docker.sock
-healthcheck:
-  image: llparse/swarmkit:v1.12
-  command: giddyup health -p 2378
-  labels:
-    io.rancher.container.pull_image: always
-  net: container:swarmkit-mon

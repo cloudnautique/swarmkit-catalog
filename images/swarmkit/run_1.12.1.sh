@@ -5,10 +5,13 @@
 # 2. Host labels are merely a visual aid (and useful for simple debugging)
 
 META_URL="http://rancher-metadata.rancher.internal/2015-12-19"
-SERVICE_NAME="swarm-mgr"
+SERVICE_NAME="swarmkit-mon"
 
 # This may be tuned for extra resilience - user should register at least this number of hosts
 MANAGER_SCALE=3
+
+# in the event AGENT_IP isn't a private IP, docker forces us to choose an interface to listen on
+FALLBACK_IFACE=eth0
 
 AGENT_IP=$(curl -s ${META_URL}/self/host/agent_ip)
 while [ "$AGENT_IP" == "" ]; do
@@ -97,8 +100,7 @@ publish_tokens() {
 }
 
 publish_label() {
-  local name=$1
-  local value=$2
+  local name=$1 value=$2
 
   HOST_DATA=$(curl -s -u $CATTLE_ACCESS_KEY:$CATTLE_SECRET_KEY "${CATTLE_URL}/hosts?uuid=${HOST_UUID}")
   PROJECT_ID=$(echo $HOST_DATA | jq -r '.data[0].accountId')
@@ -156,22 +158,21 @@ reconcile_node() {
   docker node rm $manager_id
 }
 
+# Bootstrap a new 1-node manager cluster
 bootstrap_node() {
   # CATTLE_AGENT_IP will be the private IP in properly configured environments
   docker swarm init \
-    --advertise-addr $AGENT_IP:2377
+    --advertise-addr ${AGENT_IP}:2377
 
   # If we get this error back: must specify a listening address because the address
   # to advertise is not recognized as a system address
   # 
-  # CATTLE_AGENT_IP is configured with public IPs...fall back to listening on eth0
+  # CATTLE_AGENT_IP is configured with public IPs...bind to fallback interface
   if [ "$?" != "0" ]; then
     docker swarm init \
-      --advertise-addr $AGENT_IP:2377 \
-      --listen-addr eth0:2377
+      --advertise-addr ${AGENT_IP}:2377 \
+      --listen-addr ${FALLBACK_IFACE}:2377
   fi
-
-  #giddyup probe tcp://${AGENT_IP}:2377 --loop --min 1s --max 5s --backoff 1.4
 
   publish_tokens
   publish_label swarm manager
@@ -179,43 +180,56 @@ bootstrap_node() {
 
 runtime_node() {
   # TODO: For resiliency, loop through swarm=manager hosts instead of using LEADER_IP
-  leader_ip=$(get_leader)
+  local leader_ip=$(get_leader)
   giddyup probe tcp://${leader_ip}:2377 --loop --min 1s --max 4s --backoff 2 --num 4
   if [ "$?" != "0" ]; then
     exit 1
   fi
 
+  local nodetype token
   # TODO: use containers with lowest create_index instead of lowest service_index
   if [ "$(get_service_index)" -le "$MANAGER_SCALE" ]; then
-    docker swarm join --token $(manager_token) ${leader_ip}:2377
-    publish_label swarm manager
+    nodetype=manager
+    token=$(manager_token)
   else
-    docker swarm join --token $(worker_token) ${leader_ip}:2377
-    publish_label swarm worker
+    nodetype=worker
+    token=$(worker_token)
   fi
+
+  docker swarm join \
+    --token $token \
+    --advertise-addr ${AGENT_IP}:2377 \
+      ${leader_ip}:2377
+
+  # see bootstrap_node() comments for reasoning behind this
+  if [ "$?" != "0" ]; then
+    docker swarm join \
+      --token $token \
+      --advertise-addr ${AGENT_IP}:2377 \
+      --listen-addr ${FALLBACK_IFACE}:2377 \
+        ${leader_ip}:2377
+  fi
+
+  publish_label swarm $nodetype
 }
 
 node() {
-  if [ -f /dr ]; then
-    # Disaster recovery
-    echo "Performing disaster recovery (unimplemented)"
-    rm /dr
+  if [ "$(get_leader)" == "$AGENT_IP" ]; then
 
-  # If we are the leader
-  elif [ "$(get_leader)" == "$AGENT_IP" ]; then
-
-    # Bootstrap a new 1-node manager cluster
     if [ "$(local_node_state)" == "inactive" ]; then
       bootstrap_node
+
     else
       reconcile_node
     fi
-  # Scale up
-  else
+
+  # TODO: consider detecting nodes stuck in "pending" state
+  elif [ "$(local_node_state)" == "inactive" ]; then
     runtime_node
   fi
 }
 
+giddyup health -p 2378 --check-command /opt/rancher/health.sh &
 while true; do
   node
   sleep 60
