@@ -135,27 +135,32 @@ reconcile_node() {
   worker_node_count=$(echo $active_worker_nodes | jq length)
 
   # conditions for not performing reconciliation
-  if [ "$manager_unreachable_count" -eq "0" ]; then
+  if [ "$manager_unreachable_count" -eq "0" ] && [ "$manager_reachable_count" -eq "$MANAGER_SCALE" ]; then
     echo "All $manager_reachable_count managers reachable."
     return
   elif [ "$manager_reachable_count" -le "$manager_unreachable_count" ]; then
     echo "Disaster scenario! Manual intervention required."
     return
   elif [ "$worker_node_count" -eq "0" ]; then
-    echo "No workers present for promotion, add more nodes to restore resiliency."
+    echo "No workers present for promotion, add more nodes to enable reconciliation."
     return
   fi
 
-  echo "Detected $manager_reachable_count reachable and $manager_unreachable_count unreachable managers, $worker_node_count workers. Reconciling."
+  echo "Detected $manager_reachable_count reachable and $manager_unreachable_count unreachable managers, $worker_node_count workers"
+  echo "Desired manager count is $MANAGER_SCALE"
 
+  # promote a worker
   # TODO choose the worker with lowest Rancher create_index to ensure leader is always a manager
-  manager_id=$(echo $unreachable_manager_nodes | jq -r .[0].ID)
   worker_id=$(echo $active_worker_nodes | jq -r .[0].ID)
-
   # TODO promoted node should fix his host label
   docker node promote $worker_id
-  docker node demote $manager_id
-  docker node rm $manager_id
+
+  # demote/delete an unreachable manager
+  if [ "$manager_unreachable_count" -gt "0" ]; then
+    manager_id=$(echo $unreachable_manager_nodes | jq -r .[0].ID)
+    docker node demote $manager_id
+    docker node rm $manager_id
+  fi
 }
 
 # Bootstrap a new 1-node manager cluster
