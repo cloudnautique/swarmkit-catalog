@@ -6,7 +6,4 @@
 
 # Notes
 
-The SwarmKit stack and the underlying swarm are decoupled. The following behavior is advantageous:
-
-1. Users wanting the "native" swarm experience (no automatic recovery in failure situations) can simply delete the stack after all containers become healthy
-2. If the automation has a bug, deleting/recreating the stack won't affect availability (but please file a bug report!)
+The SwarmKit stack and the underlying swarm are decoupled. Therefore, deleting the stack will leave the Swarm untouched, but failure recovery will become a manual process.

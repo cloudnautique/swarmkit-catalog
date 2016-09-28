@@ -28,7 +28,6 @@ container_create_idx() { echo $(curl -s ${META_URL}/services/${SERVICE_NAME}/con
 container_svc_idx()    { echo $(curl -s ${META_URL}/services/${SERVICE_NAME}/containers/${1}/service_index); }
 container_host_uuid()  { echo $(curl -s ${META_URL}/services/${SERVICE_NAME}/containers/${1}/host_uuid);     }
 container_ip()         { echo $(curl -s ${META_URL}/services/${SERVICE_NAME}/containers/${1}/primary_ip);    }
-get_label()            { curl -s "${META_URL}/self/host/labels/${1}"; }
 
 token() {
   token=$(curl -s ${META_URL}/services/${SERVICE_NAME}/metadata/${1})
@@ -91,7 +90,7 @@ publish_tokens() {
     -H 'Accept: application/json' \
     -H 'Content-Type: application/json' \
     -d "${SERVICE_DATA}" \
-    "${CATTLE_URL}/projects/${PROJECT_ID}/services/${SERVICE_ID}"
+    "${CATTLE_URL}/projects/${PROJECT_ID}/services/${SERVICE_ID}" &> /dev/null
 
   # validate that the write succeeded, retry if necessary
   SERVICE_DATA_CHANGED=$(curl -s -u $CATTLE_ACCESS_KEY:$CATTLE_SECRET_KEY "${CATTLE_URL}/services?uuid=${SERVICE_UUID}")
@@ -100,7 +99,9 @@ publish_tokens() {
   fi
 }
 
-publish_label() {
+get_label()            { curl -s "${META_URL}/self/host/labels/${1}"; }
+
+set_label() {
   local name=$1 value=$2
 
   HOST_DATA=$(curl -s -u $CATTLE_ACCESS_KEY:$CATTLE_SECRET_KEY "${CATTLE_URL}/hosts?uuid=${HOST_UUID}")
@@ -114,9 +115,28 @@ publish_label() {
     -H 'Accept: application/json' \
     -H 'Content-Type: application/json' \
     -d "${HOST_DATA}" \
-    "${CATTLE_URL}/projects/${PROJECT_ID}/hosts/${HOST_ID}"
+    "${CATTLE_URL}/projects/${PROJECT_ID}/hosts/${HOST_ID}" &> /dev/null
 
-  echo "Published host label $name=$value"
+  echo "Set host label $name=$value"
+}
+
+del_label() {
+  local name=$1
+
+  HOST_DATA=$(curl -s -u $CATTLE_ACCESS_KEY:$CATTLE_SECRET_KEY "${CATTLE_URL}/hosts?uuid=${HOST_UUID}")
+  PROJECT_ID=$(echo $HOST_DATA | jq -r '.data[0].accountId')
+  HOST_ID=$(echo $HOST_DATA | jq -r '.data[0].id')
+  HOST_DATA=$(curl -s -u $CATTLE_ACCESS_KEY:$CATTLE_SECRET_KEY "${CATTLE_URL}/projects/${PROJECT_ID}/hosts/${HOST_ID}")
+  HOST_DATA=$(echo $HOST_DATA | jq 'del(.labels.swarm)')
+
+  curl -s -X PUT \
+    -u "${CATTLE_ACCESS_KEY}:${CATTLE_SECRET_KEY}" \
+    -H 'Accept: application/json' \
+    -H 'Content-Type: application/json' \
+    -d "${HOST_DATA}" \
+    "${CATTLE_URL}/projects/${PROJECT_ID}/hosts/${HOST_ID}" &> /dev/null
+
+  echo "Deleted host label $name"
 }
 
 reconcile_label() {
@@ -124,9 +144,9 @@ reconcile_label() {
   manager=$(is_swarm_manager)
 
   if [ "$manager" == "true" ] && [ "$label" != "manager" ]; then
-    publish_label swarm manager
-  elif [ "$manager" == "false" ] && [ "$label" != "worker" ]; then
-    publish_label swarm worker
+    set_label swarm manager
+  elif [ "$manager" == "false" ] && [ "$label" == "Not Found" ]; then
+    del_label swarm
   fi
 }
 
@@ -232,7 +252,7 @@ bootstrap_node() {
   fi
 
   publish_tokens
-  publish_label swarm manager
+  set_label swarm manager
 }
 
 runtime_node() {
@@ -247,12 +267,10 @@ runtime_node() {
   should_be_manager=$(curl -s -H 'Accept:application/json' ${META_URL}/services/${SERVICE_NAME}/containers \
    | jq "sort_by(.create_index) | .[0:$MANAGER_SCALE]  | map(select(.host_uuid==\"$HOST_UUID\")) | length")
 
-  local nodetype token
+  local token
   if [ "$should_be_manager" -eq "1" ]; then
-    nodetype=manager
     token=$(manager_token)
   else
-    nodetype=worker
     token=$(worker_token)
   fi
 
@@ -270,7 +288,9 @@ runtime_node() {
         ${leader_ip}:2377
   fi
 
-  publish_label swarm $nodetype
+  if [ "$should_be_manager" -eq "1" ]; then
+    set_label swarm manager
+  fi
 }
 
 node() {
@@ -284,14 +304,15 @@ node() {
     fi
 
     if [ "$(get_label swarm)" != "master" ]; then
-      publish_label swarm master
+      set_label swarm master
     fi
 
   elif [ "$(local_node_state)" == "inactive" ]; then
     runtime_node
+  else
+    reconcile_label
   fi
 
-  reconcile_label
 }
 
 giddyup health -p 2378 --check-command /opt/rancher/health.sh &
