@@ -164,11 +164,18 @@ reconcile_node() {
   active_worker_nodes=$(echo $nodes | jq 'map(select(.Spec.Role == "worker")) | map(select(.Spec.Availability == "active"))')
 
   # count all nodes
+  node_count=$(echo $nodes | jq length)
   manager_reachable_count=$(echo $reachable_manager_nodes | jq length)
   manager_unreachable_count=$(echo $unreachable_manager_nodes | jq length)
+  manager_count=$(($manager_reachable_count + $manager_unreachable_count))
   worker_node_count=$(echo $active_worker_nodes | jq length)
 
-  echo "Detected $manager_reachable_count/$manager_unreachable_count reachable managers ($MANAGER_SCALE desired), $worker_node_count workers"
+  echo "$manager_reachable_count/$manager_count reachable managers, $worker_node_count active workers"
+
+  # warnings
+  if [ "$node_count" -lt "$MANAGER_SCALE" ]; then
+    echo "WARNING: Only $node_count nodes available, need >= $MANAGER_SCALE nodes to acheive resiliency guarantees!"
+  fi
 
   # conditions for not performing reconciliation
   if [ "$manager_unreachable_count" -eq "0" ] && [ "$manager_reachable_count" -ge "$MANAGER_SCALE" ]; then
@@ -177,7 +184,7 @@ reconcile_node() {
     echo "Disaster scenario! Manual intervention required."
     return
   elif [ "$worker_node_count" -eq "0" ]; then
-    echo "No workers present for promotion, add more nodes to enable reconciliation."
+    echo "No active workers present for promotion, add more nodes to enable reconciliation."
     return
   fi
 
@@ -276,11 +283,15 @@ node() {
       reconcile_node
     fi
 
+    if [ "$(get_label swarm)" != "master" ]; then
+      publish_label swarm master
+    fi
+
   elif [ "$(local_node_state)" == "inactive" ]; then
     runtime_node
-  else
-    reconcile_label
   fi
+
+  reconcile_label
 }
 
 giddyup health -p 2378 --check-command /opt/rancher/health.sh &
