@@ -8,7 +8,7 @@ META_URL="http://rancher-metadata.rancher.internal/2015-12-19"
 SERVICE_NAME="swarmkit-mon"
 
 # This may be tuned for extra resilience - user should register at least this number of hosts
-MANAGER_SCALE=3
+MANAGER_SCALE=${MANAGER_SCALE:-3}
 
 # in the event AGENT_IP isn't configured with a system address/private ip,
 # docker forces us to choose an interface to listen on
