@@ -28,6 +28,7 @@ container_create_idx() { echo $(curl -s ${META_URL}/services/${SERVICE_NAME}/con
 container_svc_idx()    { echo $(curl -s ${META_URL}/services/${SERVICE_NAME}/containers/${1}/service_index); }
 container_host_uuid()  { echo $(curl -s ${META_URL}/services/${SERVICE_NAME}/containers/${1}/host_uuid);     }
 container_ip()         { echo $(curl -s ${META_URL}/services/${SERVICE_NAME}/containers/${1}/primary_ip);    }
+get_label()            { curl -s "${META_URL}/self/host/labels/${1}"; }
 
 token() {
   token=$(curl -s ${META_URL}/services/${SERVICE_NAME}/metadata/${1})
@@ -114,11 +115,19 @@ publish_label() {
     -H 'Content-Type: application/json' \
     -d "${HOST_DATA}" \
     "${CATTLE_URL}/projects/${PROJECT_ID}/hosts/${HOST_ID}"
+
+  echo "Published host label $name=$value"
 }
 
 reconcile_label() {
-  # TODO promoted/demoted node should fix its host label
-  echo TODO maybe fix my host label
+  label=$(get_label swarm)
+  manager=$(is_swarm_manager)
+
+  if [ "$manager" == "true" ] && [ "$label" != "manager" ]; then
+    publish_label swarm manager
+  elif [ "$manager" == "false" ] && [ "$label" != "worker" ]; then
+    publish_label swarm worker
+  fi
 }
 
 # when a host is removed from a Rancher environment, remove it from the swarm
@@ -159,12 +168,10 @@ reconcile_node() {
   manager_unreachable_count=$(echo $unreachable_manager_nodes | jq length)
   worker_node_count=$(echo $active_worker_nodes | jq length)
 
-  echo "Detected $manager_reachable_count reachable and $manager_unreachable_count unreachable managers, $worker_node_count workers"
-  echo "Desired manager count is $MANAGER_SCALE"
+  echo "Detected $manager_reachable_count/$manager_unreachable_count reachable managers ($MANAGER_SCALE desired), $worker_node_count workers"
 
   # conditions for not performing reconciliation
   if [ "$manager_unreachable_count" -eq "0" ] && [ "$manager_reachable_count" -ge "$MANAGER_SCALE" ]; then
-    echo "All $manager_reachable_count managers reachable."
     return
   elif [ "$manager_reachable_count" -le "$manager_unreachable_count" ]; then
     echo "Disaster scenario! Manual intervention required."
@@ -173,8 +180,6 @@ reconcile_node() {
     echo "No workers present for promotion, add more nodes to enable reconciliation."
     return
   fi
-
-  # TODO demote extra managers to workers, in case user manually intervenes?
 
   # demote/delete an unreachable manager
   if [ "$manager_unreachable_count" -gt "0" ]; then
@@ -185,7 +190,7 @@ reconcile_node() {
   fi
 
   # promote a worker
-  # TODO choose the worker with lowest Rancher create_index to ensure leader is always a manager
+  # TODO choose the worker with lowest Rancher create_index to ensure leader is always a manager..otherwise we might elect a non-manager for reconciliation
   worker_id=$(echo $active_worker_nodes | jq -r .[0].ID)
   docker node promote $worker_id
 
@@ -197,6 +202,7 @@ reconcile_node() {
     if [ "$(echo $nodes | jq 'map(select(.Status.State=="ready")) | map(select(.Description.Hostname=="$hostname")) | .[0].ID')" != "" ]; then
       id=$(echo $nodes | jq -r "map(select(.Status.State==\"down\"))  | map(select(.Description.Hostname==\"$hostname\")) | .[0].ID")
       echo $hostname has a dead node with id $id we can safely delete
+      docker node demote $id
       docker node rm $id
     fi
   done
@@ -280,5 +286,5 @@ node() {
 giddyup health -p 2378 --check-command /opt/rancher/health.sh &
 while true; do
   node
-  sleep 60
+  sleep 30
 done

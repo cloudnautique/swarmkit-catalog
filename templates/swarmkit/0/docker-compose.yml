@@ -8,6 +8,7 @@ swarmkit-mon:
     io.rancher.container.dns: 'true'
     io.rancher.container.pull_image: always
     io.rancher.scheduler.affinity:host_label: io.rancher.host.docker_version=1.12
+    io.rancher.scheduler.affinity:host_label_soft: swarm=manager
     io.rancher.scheduler.global: 'true'
   net: host
   privileged: true
