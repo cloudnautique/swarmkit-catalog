@@ -1,4 +1,4 @@
-#!/bin/bash -x
+#!/bin/bash
 
 # Facts:
 # 1. The leader (lowest create_index) is always a manager
@@ -10,7 +10,8 @@ SERVICE_NAME="swarmkit-mon"
 # This may be tuned for extra resilience - user should register at least this number of hosts
 MANAGER_SCALE=3
 
-# in the event AGENT_IP isn't a private IP, docker forces us to choose an interface to listen on
+# in the event AGENT_IP isn't configured with a system address/private ip,
+# docker forces us to choose an interface to listen on
 FALLBACK_IFACE=eth0
 
 AGENT_IP=$(curl -s ${META_URL}/self/host/agent_ip)
@@ -41,8 +42,7 @@ manager_token() { echo $(token manager); }
 worker_token()  { echo $(token worker);  }
 
 get_leader() {
-  local lowest_index
-  local lowest_ip
+  local lowest_index lowest_ip
   for container in $(containers); do
     c=$(echo $container | cut -d= -f2)
     create_index=$(container_create_idx $c)
@@ -118,15 +118,38 @@ publish_label() {
   # TODO validate that the write succeeded, retry if necessary
 }
 
+# when a host is removed from a Rancher environment, carefully remove it from the swarm
+remove_old_hosts() {
+  nodes=$(curl -s --unix-socket /var/run/docker.sock http::/nodes)
+  hosts=$(curl -s -H 'Accept:application/json' ${META_URL}/hosts)
+  for hostname in $(echo $hosts | jq -r .[].hostname); do
+    # filter out the hostnames in Rancher metadata
+    nodes=$(echo $nodes | jq "map(select(.Description.Hostname!=\"$hostname\"))")
+  done
+
+  # remaining nodes are not in an environment and should be removed
+  for hostname in $(echo $nodes | jq -r .[].Description.Hostname); do
+    id=$(echo $nodes | jq -r "map(select(.Description.Hostname==\"$hostname\")) | .[0].ID")
+    role=$(echo $nodes | jq -r "map(select(.Description.Hostname==\"$hostname\")) | .[0].Spec.Role")
+    if [ "$role" == "manager" ]; then
+      docker node demote $id
+    fi
+    docker node rm $id --force
+    echo Removed $id from the swarm.
+  done
+}
+
 # promote/demote/delete nodes as necessary
 reconcile_node() {
+  remove_old_hosts
+
   # get current view of swarm nodes
   nodes=$(curl -s --unix-socket /var/run/docker.sock http::/nodes)
 
   # filter nodes based on healthy/role
   reachable_manager_nodes=$(echo $nodes | jq 'map(select(.Spec.Role == "manager")) | map(select(.ManagerStatus.Reachability == "reachable"))')
   unreachable_manager_nodes=$(echo $nodes | jq 'map(select(.Spec.Role == "manager")) | map(select(.ManagerStatus.Reachability == "unreachable"))')
-  # ignore dead workers
+  # active workers
   active_worker_nodes=$(echo $nodes | jq 'map(select(.Spec.Role == "worker")) | map(select(.Spec.Availability == "active"))')
 
   # count all nodes
@@ -135,7 +158,7 @@ reconcile_node() {
   worker_node_count=$(echo $active_worker_nodes | jq length)
 
   # conditions for not performing reconciliation
-  if [ "$manager_unreachable_count" -eq "0" ] && [ "$manager_reachable_count" -eq "$MANAGER_SCALE" ]; then
+  if [ "$manager_unreachable_count" -eq "0" ] && [ "$manager_reachable_count" -ge "$MANAGER_SCALE" ]; then
     echo "All $manager_reachable_count managers reachable."
     return
   elif [ "$manager_reachable_count" -le "$manager_unreachable_count" ]; then
@@ -146,21 +169,36 @@ reconcile_node() {
     return
   fi
 
+  # TODO if we can't fix it, demote extra managers to workers
+
+
   echo "Detected $manager_reachable_count reachable and $manager_unreachable_count unreachable managers, $worker_node_count workers"
   echo "Desired manager count is $MANAGER_SCALE"
-
-  # promote a worker
-  # TODO choose the worker with lowest Rancher create_index to ensure leader is always a manager
-  worker_id=$(echo $active_worker_nodes | jq -r .[0].ID)
-  # TODO promoted node should fix his host label
-  docker node promote $worker_id
 
   # demote/delete an unreachable manager
   if [ "$manager_unreachable_count" -gt "0" ]; then
     manager_id=$(echo $unreachable_manager_nodes | jq -r .[0].ID)
     docker node demote $manager_id
     docker node rm $manager_id
+    echo Removed $manager_id from the swarm.
   fi
+
+  # promote a worker
+  # TODO choose the worker with lowest Rancher create_index to ensure leader is always a manager
+  worker_id=$(echo $active_worker_nodes | jq -r .[0].ID)
+  docker node promote $worker_id
+
+  # refresh view of swarm nodes
+  nodes=$(curl -s --unix-socket /var/run/docker.sock http::/nodes)
+
+  # delete down nodes that were replaced (perhaps user manually intervened?)
+  for hostname in $(echo $nodes | jq -r 'map(select(.Status.State=="down"))  | .[].Description.Hostname'); do
+    if [ "$(echo $nodes | jq 'map(select(.Status.State=="ready")) | map(select(.Description.Hostname=="$hostname")) | .[0].ID')" != "" ]; then
+      id=$(echo $nodes | jq -r "map(select(.Status.State==\"down\"))  | map(select(.Description.Hostname==\"$hostname\")) | .[0].ID")
+      echo $hostname has a dead node with id $id we can safely delete
+      docker node rm $id
+    fi
+  done
 }
 
 # Bootstrap a new 1-node manager cluster
@@ -191,9 +229,12 @@ runtime_node() {
     exit 1
   fi
 
+  # use containers with lowest create_index as managers
+  should_be_manager=$(curl -s -H 'Accept:application/json' ${META_URL}/services/${SERVICE_NAME}/containers \
+   | jq "sort_by(.create_index) | .[0:$MANAGER_SCALE]  | map(select(.host_uuid==\"$HOST_UUID\")) | length")
+
   local nodetype token
-  # TODO: use containers with lowest create_index instead of lowest service_index
-  if [ "$(get_service_index)" -le "$MANAGER_SCALE" ]; then
+  if [ "$should_be_manager" -eq "1" ]; then
     nodetype=manager
     token=$(manager_token)
   else
@@ -231,6 +272,9 @@ node() {
   # TODO: consider detecting nodes stuck in "pending" state
   elif [ "$(local_node_state)" == "inactive" ]; then
     runtime_node
+  else
+    # TODO promoted/demoted node should fix its host label
+    echo TODO maybe fix my host label
   fi
 }
 

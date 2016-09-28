@@ -1,4 +1,4 @@
-#!/bin/bash -x
+#!/bin/bash
 
 # Determine Docker server version
 version=$(docker version|grep Version|head -n1|cut -d: -f2|tr -d '[[:space:]]')
