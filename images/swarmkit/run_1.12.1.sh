@@ -190,22 +190,19 @@ reconcile_node() {
   manager_count=$(($manager_reachable_count + $manager_unreachable_count))
   worker_node_count=$(echo $active_worker_nodes | jq length)
 
-  echo "$manager_reachable_count/$manager_count reachable managers, $worker_node_count active workers"
+  echo "$manager_reachable_count of $manager_count manager(s) reachable, $worker_node_count worker(s) active"
 
-  # warnings
-  if [ "$node_count" -lt "$MANAGER_SCALE" ]; then
-    echo "WARNING: Only $node_count nodes available, need >= $MANAGER_SCALE nodes to acheive resiliency guarantees!"
-  fi
-
-  # conditions for not performing reconciliation
-  if [ "$manager_unreachable_count" -eq "0" ] && [ "$manager_reachable_count" -ge "$MANAGER_SCALE" ]; then
+  # conditions for not performing reconciliations
+  if [ "$manager_reachable_count" -le "$manager_unreachable_count" ]; then
+    echo "ERROR: Majority managers lost. Manual intervention required."
     return
-  elif [ "$manager_reachable_count" -le "$manager_unreachable_count" ]; then
-    echo "Disaster scenario! Manual intervention required."
+  elif [ "$manager_unreachable_count" -eq "0" ] && [ "$manager_reachable_count" -ge "$MANAGER_SCALE" ]; then
     return
   elif [ "$worker_node_count" -eq "0" ]; then
     echo "No active workers present for promotion, add more nodes to enable reconciliation."
     return
+  elif [ "$node_count" -lt "$MANAGER_SCALE" ]; then
+    echo "WARNING: Only $node_count nodes available, need >= $MANAGER_SCALE nodes to acheive resiliency guarantees!"
   fi
 
   # demote/delete an unreachable manager

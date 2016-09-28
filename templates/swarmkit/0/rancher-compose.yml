@@ -12,6 +12,7 @@
     - 3
     - 5
     - 7
+    - 9
 swarmkit-mon:
   health_check:
     request_line: GET /ping HTTP/1.0
