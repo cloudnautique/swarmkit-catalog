@@ -1,7 +1,0 @@
-name: Swarmkitx
-description: |
-  (Experimental) Docker Swarmkit
-version: v0.1.0-rancher1
-category: Clustering
-maintainer: "cloudnautique"
-minimum_rancher_version: 1.0.0

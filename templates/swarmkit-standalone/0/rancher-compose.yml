@@ -1,9 +1,0 @@
-.catalog:
-  version: v1.12.0
-swarm-node:
-  health_check:
-    port: 4242
-    interval: 5000
-    response_timeout: 3000
-    healthy_threshold: 1
-    unhealthy_threshold: 2

@@ -114,11 +114,14 @@ publish_label() {
     -H 'Content-Type: application/json' \
     -d "${HOST_DATA}" \
     "${CATTLE_URL}/projects/${PROJECT_ID}/hosts/${HOST_ID}"
-
-  # TODO validate that the write succeeded, retry if necessary
 }
 
-# when a host is removed from a Rancher environment, carefully remove it from the swarm
+reconcile_label() {
+  # TODO promoted/demoted node should fix its host label
+  echo TODO maybe fix my host label
+}
+
+# when a host is removed from a Rancher environment, remove it from the swarm
 remove_old_hosts() {
   nodes=$(curl -s --unix-socket /var/run/docker.sock http::/nodes)
   hosts=$(curl -s -H 'Accept:application/json' ${META_URL}/hosts)
@@ -139,7 +142,6 @@ remove_old_hosts() {
   done
 }
 
-# promote/demote/delete nodes as necessary
 reconcile_node() {
   remove_old_hosts
 
@@ -157,6 +159,9 @@ reconcile_node() {
   manager_unreachable_count=$(echo $unreachable_manager_nodes | jq length)
   worker_node_count=$(echo $active_worker_nodes | jq length)
 
+  echo "Detected $manager_reachable_count reachable and $manager_unreachable_count unreachable managers, $worker_node_count workers"
+  echo "Desired manager count is $MANAGER_SCALE"
+
   # conditions for not performing reconciliation
   if [ "$manager_unreachable_count" -eq "0" ] && [ "$manager_reachable_count" -ge "$MANAGER_SCALE" ]; then
     echo "All $manager_reachable_count managers reachable."
@@ -169,11 +174,7 @@ reconcile_node() {
     return
   fi
 
-  # TODO if we can't fix it, demote extra managers to workers
-
-
-  echo "Detected $manager_reachable_count reachable and $manager_unreachable_count unreachable managers, $worker_node_count workers"
-  echo "Desired manager count is $MANAGER_SCALE"
+  # TODO demote extra managers to workers, in case user manually intervenes?
 
   # demote/delete an unreachable manager
   if [ "$manager_unreachable_count" -gt "0" ]; then
@@ -222,9 +223,9 @@ bootstrap_node() {
 }
 
 runtime_node() {
-  # TODO: For resiliency, loop through swarm=manager hosts instead of using LEADER_IP
+  # TODO For resiliency, we might want to loop through swarm=manager hosts instead of requiring the leader
   local leader_ip=$(get_leader)
-  giddyup probe tcp://${leader_ip}:2377 --loop --min 1s --max 4s --backoff 2 --num 4
+  giddyup probe tcp://${leader_ip}:2377 --loop --min 1s --max 4s --backoff 2 --num 4 &> /dev/null
   if [ "$?" != "0" ]; then
     exit 1
   fi
@@ -269,12 +270,10 @@ node() {
       reconcile_node
     fi
 
-  # TODO: consider detecting nodes stuck in "pending" state
   elif [ "$(local_node_state)" == "inactive" ]; then
     runtime_node
   else
-    # TODO promoted/demoted node should fix its host label
-    echo TODO maybe fix my host label
+    reconcile_label
   fi
 }
 

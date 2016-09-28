@@ -1,5 +1,5 @@
 .catalog:
-  version: v1.12
+  version: v1.12-rancher1
 swarmkit-mon:
   health_check:
     request_line: GET /ping HTTP/1.0
