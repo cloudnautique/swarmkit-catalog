@@ -10,10 +10,6 @@ SERVICE_NAME="swarmkit-mon"
 # This may be tuned for extra resilience - user should register at least this number of hosts
 MANAGER_SCALE=${MANAGER_SCALE:-3}
 
-# in the event AGENT_IP isn't configured with a system address/private ip,
-# docker forces us to choose an interface to listen on
-FALLBACK_IFACE=eth0
-
 AGENT_IP=$(curl -s ${META_URL}/self/host/agent_ip)
 while [ "$AGENT_IP" == "" ]; do
   sleep 1
@@ -234,18 +230,12 @@ reconcile_node() {
 
 # Bootstrap a new 1-node manager cluster
 bootstrap_node() {
-  # CATTLE_AGENT_IP will be the private IP in properly configured environments
-  docker swarm init \
-    --advertise-addr ${AGENT_IP}:2377
-
-  # If we get this error back: must specify a listening address because the address
-  # to advertise is not recognized as a system address
-  # 
-  # CATTLE_AGENT_IP is configured with public IPs...bind to fallback interface
-  if [ "$?" != "0" ]; then
+  if [ "$LISTEN_INTERFACE" == "" ]; then
+    docker swarm init
+  else
     docker swarm init \
       --advertise-addr ${AGENT_IP}:2377 \
-      --listen-addr ${FALLBACK_IFACE}:2377
+      --listen-addr ${LISTEN_INTERFACE}:2377
   fi
 
   publish_tokens
@@ -271,17 +261,16 @@ runtime_node() {
     token=$(worker_token)
   fi
 
-  docker swarm join \
-    --token $token \
-    --advertise-addr ${AGENT_IP}:2377 \
-      ${leader_ip}:2377
-
-  # see bootstrap_node() comments for reasoning behind this
-  if [ "$?" != "0" ]; then
+  if [ "$LISTEN_INTERFACE" == "" ]; then
+    # let swarm try to detect the interface
+    docker swarm join \
+      --token $token \
+        ${leader_ip}:2377
+  else
     docker swarm join \
       --token $token \
       --advertise-addr ${AGENT_IP}:2377 \
-      --listen-addr ${FALLBACK_IFACE}:2377 \
+      --listen-addr ${LISTEN_INTERFACE}:2377 \
         ${leader_ip}:2377
   fi
 
@@ -298,10 +287,6 @@ node() {
 
     else
       reconcile_node
-    fi
-
-    if [ "$(get_label swarm)" != "master" ]; then
-      set_label swarm master
     fi
 
   elif [ "$(local_node_state)" == "inactive" ]; then
