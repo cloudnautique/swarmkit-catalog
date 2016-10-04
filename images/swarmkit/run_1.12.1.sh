@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/bash -x
 
 # Facts:
 # 1. The leader (lowest create_index) is always a manager
