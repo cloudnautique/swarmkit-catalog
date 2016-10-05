@@ -159,7 +159,7 @@ reconcile_label() {
 
   if [ "$manager" == "true" ] && [ "$label" != "manager" ]; then
     set_label swarm manager
-  elif [ "$manager" == "false" ] && [ "$label" == "Not Found" ]; then
+  elif [ "$manager" == "false" ] && [ "$label" != "Not found" ]; then
     del_label swarm
   fi
 }
@@ -249,15 +249,28 @@ reconcile_node() {
 # Bootstrap a new 1-node manager cluster
 bootstrap_node() {
   if [ "$LISTEN_INTERFACE" == "" ]; then
+    # Happy path
     docker swarm init
+
+    if [ "$?" != "0" ]; then
+      # Multiple addresses on the interface, specify CATTLE_AGENT_IP (Digital Ocean)
+      docker swarm init \
+        --advertise-addr ${AGENT_IP}:2377
+    fi
+
   else
+    # If advertise address isn't system address, user must specify interface
     docker swarm init \
       --advertise-addr ${AGENT_IP}:2377 \
       --listen-addr ${LISTEN_INTERFACE}:2377
   fi
 
-  publish_tokens
-  set_label swarm manager
+  if [ "$?" != "0" ]; then
+    set_label swarm sucks
+  else
+    publish_tokens
+    set_label swarm manager
+  fi
 }
 
 runtime_node() {
@@ -280,11 +293,20 @@ runtime_node() {
   fi
 
   if [ "$LISTEN_INTERFACE" == "" ]; then
-    # let swarm try to detect the interface
+    # Happy path
     docker swarm join \
       --token $token \
         ${leader_ip}:2377
+
+    if [ "$?" != "0" ]; then
+      # Multiple addresses on the interface, specify CATTLE_AGENT_IP (Digital Ocean)
+      docker swarm join \
+        --token $token \
+        --advertise-addr ${AGENT_IP}:2377 \
+          ${leader_ip}:2377
+    fi
   else
+    # If advertise address isn't system address, user must specify interface
     docker swarm join \
       --token $token \
       --advertise-addr ${AGENT_IP}:2377 \
@@ -292,7 +314,9 @@ runtime_node() {
         ${leader_ip}:2377
   fi
 
-  if [ "$should_be_manager" -eq "1" ]; then
+  if [ "$?" != "0" ]; then
+    set_label swarm sucks
+  elif [ "$should_be_manager" -eq "1" ]; then
     set_label swarm manager
   fi
 }
@@ -309,10 +333,9 @@ node() {
 
   elif [ "$(local_node_state)" == "inactive" ]; then
     runtime_node
-  else
-    reconcile_label
   fi
-
+  
+  reconcile_label
 }
 
 giddyup health -p 2378 --check-command /opt/rancher/health.sh &
