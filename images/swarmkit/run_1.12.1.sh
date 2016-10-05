@@ -92,6 +92,8 @@ publish_tokens() {
   SERVICE_DATA_CHANGED=$(curl -s -u $CATTLE_ACCESS_KEY:$CATTLE_SECRET_KEY "${CATTLE_URL}/services?uuid=${SERVICE_UUID}")
   if [ "$(echo $SERVICE_DATA_CHANGED | jq -r '.data[0].metadata.manager')" == "null" ]; then
     publish_tokens
+  else
+    echo "Set swarm join-tokens"
   fi
 }
 
@@ -113,7 +115,15 @@ set_label() {
     -d "${HOST_DATA}" \
     "${CATTLE_URL}/projects/${PROJECT_ID}/hosts/${HOST_ID}" &> /dev/null
 
-  echo "Set host label $name=$value"
+  # validate that the write succeeded, retry if necessary
+  HOST_DATA_CHANGED=$(curl -s -u $CATTLE_ACCESS_KEY:$CATTLE_SECRET_KEY "${CATTLE_URL}/projects/${PROJECT_ID}/hosts/${HOST_ID}")
+  new_value=$(echo $HOST_DATA_CHANGED | jq -r ".labels.$name")
+  if [ "$new_value" != "$value" ]; then
+    echo "Retrying set host label $name=$value"
+    set_label $name $value
+  else
+    echo "Set host label $name=$value"
+  fi
 }
 
 del_label() {
@@ -123,7 +133,7 @@ del_label() {
   PROJECT_ID=$(echo $HOST_DATA | jq -r '.data[0].accountId')
   HOST_ID=$(echo $HOST_DATA | jq -r '.data[0].id')
   HOST_DATA=$(curl -s -u $CATTLE_ACCESS_KEY:$CATTLE_SECRET_KEY "${CATTLE_URL}/projects/${PROJECT_ID}/hosts/${HOST_ID}")
-  HOST_DATA=$(echo $HOST_DATA | jq 'del(.labels.swarm)')
+  HOST_DATA=$(echo $HOST_DATA | jq "del(.labels.$name)")
 
   curl -s -X PUT \
     -u "${CATTLE_ACCESS_KEY}:${CATTLE_SECRET_KEY}" \
@@ -132,7 +142,15 @@ del_label() {
     -d "${HOST_DATA}" \
     "${CATTLE_URL}/projects/${PROJECT_ID}/hosts/${HOST_ID}" &> /dev/null
 
-  echo "Deleted host label $name"
+  # validate that the write succeeded, retry if necessary
+  HOST_DATA_CHANGED=$(curl -s -u $CATTLE_ACCESS_KEY:$CATTLE_SECRET_KEY "${CATTLE_URL}/projects/${PROJECT_ID}/hosts/${HOST_ID}")
+  new_value=$(echo $HOST_DATA_CHANGED | jq -r ".labels.$name")
+  if [ "$new_value" != "null" ]; then
+    echo "Retrying delete host label $name"
+    del_label $name
+  else
+    echo "Deleted host label $name"
+  fi
 }
 
 reconcile_label() {
