@@ -42,6 +42,7 @@ manager_token() { echo $(token manager); }
 worker_token()  { echo $(token worker);  }
 
 get_leader() {
+  set +x
   local lowest_index lowest_ip
   for container in $(containers); do
     c=$(echo $container | cut -d= -f2)
@@ -51,10 +52,12 @@ get_leader() {
       lowest_ip=$(container_ip $c)
     fi
   done
+  set -x
   echo $lowest_ip
 }
 
 get_service_index() {
+  set +x
   service_index=0
   for container in $(containers); do
     c=$(echo $container | cut -d= -f2)
@@ -65,6 +68,7 @@ get_service_index() {
       break
     fi
   done
+  set -x
   echo $service_index
 }
 
@@ -75,6 +79,7 @@ get_swarm_managers() { echo $(curl -s --unix-socket /var/run/docker.sock http::/
 get_swarm_workers()  { echo $(curl -s --unix-socket /var/run/docker.sock http::/info | jq -r .Swarm.Workers);          }
 
 publish_tokens() {
+  set +x
   SERVICE_DATA=$(curl -s -u $CATTLE_ACCESS_KEY:$CATTLE_SECRET_KEY "${CATTLE_URL}/services?uuid=${SERVICE_UUID}")
   PROJECT_ID=$(echo $SERVICE_DATA | jq -r '.data[0].accountId')
   SERVICE_ID=$(echo $SERVICE_DATA | jq -r '.data[0].id')
@@ -99,11 +104,13 @@ publish_tokens() {
   else
     echo "Set swarm join-tokens"
   fi
+  set -x
 }
 
 get_label()            { curl -s "${META_URL}/self/host/labels/${1}"; }
 
 set_label() {
+  set +x
   local name=$1 value=$2
 
   HOST_DATA=$(curl -s -u $CATTLE_ACCESS_KEY:$CATTLE_SECRET_KEY "${CATTLE_URL}/hosts?uuid=${HOST_UUID}")
@@ -128,9 +135,11 @@ set_label() {
   else
     echo "Set host label $name=$value"
   fi
+  set -x
 }
 
 del_label() {
+  set +x
   local name=$1
 
   HOST_DATA=$(curl -s -u $CATTLE_ACCESS_KEY:$CATTLE_SECRET_KEY "${CATTLE_URL}/hosts?uuid=${HOST_UUID}")
@@ -155,6 +164,7 @@ del_label() {
   else
     echo "Deleted host label $name"
   fi
+  set -x
 }
 
 reconcile_label() {
