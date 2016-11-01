@@ -52,8 +52,8 @@ get_leader() {
       lowest_ip=$(container_ip $c)
     fi
   done
-  set -x
   echo $lowest_ip
+  set -x
 }
 
 get_service_index() {
@@ -68,8 +68,8 @@ get_service_index() {
       break
     fi
   done
-  set -x
   echo $service_index
+  set -x
 }
 
 is_swarm_manager()   { echo $(curl -s --unix-socket /var/run/docker.sock http::/info | jq -r .Swarm.ControlAvailable); }
@@ -180,6 +180,7 @@ reconcile_label() {
 
 # when a host is removed from a Rancher environment, remove it from the swarm
 remove_old_hosts() {
+  set +x
   nodes=$(curl -s --unix-socket /var/run/docker.sock http::/nodes)
   hosts=$(curl -s -H 'Accept:application/json' ${META_URL}/hosts)
   for hostname in $(echo $hosts | jq -r .[].hostname | cut -d. -f1); do
@@ -197,9 +198,11 @@ remove_old_hosts() {
     docker node rm $id --force
     echo Removed $id from the swarm.
   done
+  set -x
 }
 
 reconcile_node() {
+  set +x
   remove_old_hosts
 
   # get current view of swarm nodes
@@ -220,6 +223,7 @@ reconcile_node() {
 
   echo "$manager_reachable_count of $manager_count manager(s) reachable, $worker_node_count worker(s) active"
 
+  set -x
   # conditions for not performing reconciliations
   if [ "$manager_reachable_count" -le "$manager_unreachable_count" ]; then
     echo "ERROR: Majority managers lost. Manual intervention required."
@@ -246,6 +250,7 @@ reconcile_node() {
   worker_id=$(echo $active_worker_nodes | jq -r .[0].ID)
   docker node promote $worker_id
 
+  set +x
   # refresh view of swarm nodes
   nodes=$(curl -s --unix-socket /var/run/docker.sock http::/nodes)
 
@@ -258,6 +263,7 @@ reconcile_node() {
       docker node rm $id
     fi
   done
+  set -x
 }
 
 # Bootstrap a new 1-node manager cluster

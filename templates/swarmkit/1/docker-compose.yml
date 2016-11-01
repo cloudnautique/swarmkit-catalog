@@ -1,5 +1,5 @@
 swarmkit-mon:
-  image: llparse/swarmkit:v1.12-3
+  image: llparse/swarmkit:v1.12-4
   environment:
     MANAGER_SCALE: ${MANAGER_SCALE}
     LISTEN_INTERFACE: ${LISTEN_INTERFACE}
