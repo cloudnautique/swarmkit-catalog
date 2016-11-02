@@ -20,6 +20,13 @@ while [ "$AGENT_IP" == "" ]; do
   AGENT_IP=$(curl -s ${META_URL}/self/host/agent_ip)
 done
 
+# check that agent IP is a private IP address
+if [ "$(echo $AGENT_IP | grep -E '^(192\.168|10\.|172\.1[6789]\.|172\.2[0-9]\.|172\.3[01]\.)')" == "" ]; then
+  echo Public Swarm not supported. Please re-register this host by setting CATTLE_AGENT_IP to a private IP address.
+  set_label swarm unsupported_config
+  exit 1
+fi
+
 SERVICE_UUID=$(curl -s ${META_URL}/services/${SERVICE_NAME}/uuid)
 HOST_UUID=$(curl -s ${META_URL}/self/host/uuid)
 
@@ -95,6 +102,7 @@ publish_tokens() {
   # validate that the write succeeded, retry if necessary
   SERVICE_DATA_CHANGED=$(curl -s -u $CATTLE_ACCESS_KEY:$CATTLE_SECRET_KEY "${CATTLE_URL}/services?uuid=${SERVICE_UUID}")
   if [ "$(echo $SERVICE_DATA_CHANGED | jq -r '.data[0].metadata.manager')" == "null" ]; then
+    echo "Retrying publishing tokens"
     publish_tokens
   else
     echo "Set swarm join-tokens"
@@ -104,7 +112,10 @@ publish_tokens() {
 get_label()            { curl -s "${META_URL}/self/host/labels/${1}"; }
 
 set_label() {
-  local name=$1 value=$2
+  local name=$1 value=$2 tries=$3
+  if [ "$tries" == "" ]; then
+    tries=1
+  fi
 
   HOST_DATA=$(curl -s -u $CATTLE_ACCESS_KEY:$CATTLE_SECRET_KEY "${CATTLE_URL}/hosts?uuid=${HOST_UUID}")
   PROJECT_ID=$(echo $HOST_DATA | jq -r '.data[0].accountId')
@@ -123,8 +134,14 @@ set_label() {
   HOST_DATA_CHANGED=$(curl -s -u $CATTLE_ACCESS_KEY:$CATTLE_SECRET_KEY "${CATTLE_URL}/projects/${PROJECT_ID}/hosts/${HOST_ID}")
   new_value=$(echo $HOST_DATA_CHANGED | jq -r ".labels.$name")
   if [ "$new_value" != "$value" ]; then
-    echo "Retrying set host label $name=$value"
-    set_label $name $value
+    if [ "$tries" == "5" ]; then
+      echo "Failed to set host label $name=$value ($tries tries)"
+      exit 1
+    else
+      echo "Retrying set host label $name=$value"
+      set_label $name $value $(($tries + 1))
+      sleep 0.5
+    fi
   else
     echo "Set host label $name=$value"
   fi
@@ -152,6 +169,7 @@ del_label() {
   if [ "$new_value" != "null" ]; then
     echo "Retrying delete host label $name"
     del_label $name
+    sleep 0.5
   else
     echo "Deleted host label $name"
   fi
@@ -238,44 +256,30 @@ reconcile_node() {
     return
   elif [ "$manager_unreachable_count" -eq "0" ] && [ "$manager_reachable_count" -eq "$MANAGER_SCALE" ]; then
     return
-  elif [ "$worker_node_count" -eq "0" ]; then
-    echo "No active workers present for promotion, add more nodes to enable reconciliation."
-    return
-  elif [ "$node_count" -lt "$MANAGER_SCALE" ]; then
-    echo "WARNING: Only $node_count nodes available, need >= $MANAGER_SCALE nodes to acheive resiliency guarantees!"
   fi
 
-  if   [ "$manager_reachable_count" -lt "$MANAGER_SCALE" ]; then
-    # TODO choose the worker with lowest Rancher create_index to ensure leader is always a manager..otherwise we might elect a non-manager for reconciliation
-    # promote a worker
-    worker_id=$(echo $active_worker_nodes | jq -r .[0].ID)
-    docker node promote $worker_id
+  # promote a worker
+  if [ "$manager_reachable_count" -lt "$MANAGER_SCALE" ]; then
+    if [ "$worker_node_count" -gt "0" ]; then
+      # TODO choose the worker with lowest Rancher create_index to ensure leader is always a manager..otherwise we might elect a non-manager for reconciliation
+      worker_id=$(echo $active_worker_nodes | jq -r .[0].ID)
+      docker node promote $worker_id
+    else
+      echo "No active workers present for promotion, add more nodes to enable reconciliation."
+    fi
+  # demote a manager
   elif [ "$manager_reachable_count" -gt "$MANAGER_SCALE" ]; then
     # TODO choose the manager with highest Rancher create_index to ensure leader is always a manager...
-    # demote a manager
-    manager_id=$(echo $manager_reachable_count | jq -r .[0].ID)
+    manager_id=$(echo $reachable_manager_nodes | jq -r .[0].ID)
     docker node demote $manager_id
   fi
 }
 
 # Bootstrap a new 1-node manager cluster
 bootstrap_node() {
-  if [ "$LISTEN_INTERFACE" == "" ]; then
-    # Happy path
-    docker swarm init
-
-    if [ "$?" != "0" ]; then
-      # Multiple addresses on the interface, specify CATTLE_AGENT_IP (Digital Ocean)
-      docker swarm init \
-        --advertise-addr ${AGENT_IP}:2377
-    fi
-
-  else
-    # If advertise address isn't system address, user must specify interface
-    docker swarm init \
-      --advertise-addr ${AGENT_IP}:2377 \
-      --listen-addr ${LISTEN_INTERFACE}:2377
-  fi
+  docker swarm init \
+    --listen-addr ${AGENT_IP}:2377 \
+    --advertise-addr ${AGENT_IP}:2377
 
   if [ "$?" != "0" ]; then
     set_label swarm failed
@@ -306,27 +310,11 @@ runtime_node() {
     token=$(worker_token)
   fi
 
-  if [ "$LISTEN_INTERFACE" == "" ]; then
-    # Happy path
-    docker swarm join \
-      --token $token \
-        ${leader_ip}:2377
-
-    if [ "$?" != "0" ]; then
-      # Multiple addresses on the interface, specify CATTLE_AGENT_IP (Digital Ocean)
-      docker swarm join \
-        --token $token \
-        --advertise-addr ${AGENT_IP}:2377 \
-          ${leader_ip}:2377
-    fi
-  else
-    # If advertise address isn't system address, user must specify interface
-    docker swarm join \
-      --token $token \
-      --advertise-addr ${AGENT_IP}:2377 \
-      --listen-addr ${LISTEN_INTERFACE}:2377 \
-        ${leader_ip}:2377
-  fi
+  docker swarm join \
+    --token $token \
+    --listen-addr ${AGENT_IP}:2377 \
+    --advertise-addr ${AGENT_IP}:2377 \
+      ${leader_ip}:2377
 
   if [ "$?" != "0" ]; then
     set_label swarm failed
@@ -355,8 +343,8 @@ node() {
 }
 
 leave_swarm() {
-  echo Leaving old swarm
   set_label swarm wait_leaving
+  echo Leaving old swarm
   docker swarm leave --force
   if [ "$?" != "0" ]; then
     set_label swarm deadlock
