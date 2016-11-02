@@ -1,4 +1,4 @@
-#!/bin/bash -x
+#!/bin/bash
 
 # Determine Docker server version
 version=$(docker version|grep Version|head -n1|cut -d: -f2|tr -d '[[:space:]]')
@@ -42,7 +42,6 @@ manager_token() { echo $(token manager); }
 worker_token()  { echo $(token worker);  }
 
 get_leader() {
-  set +x
   local lowest_index lowest_ip
   for container in $(containers); do
     c=$(echo $container | cut -d= -f2)
@@ -53,11 +52,9 @@ get_leader() {
     fi
   done
   echo $lowest_ip
-  set -x
 }
 
 get_service_index() {
-  set +x
   service_index=0
   for container in $(containers); do
     c=$(echo $container | cut -d= -f2)
@@ -69,7 +66,6 @@ get_service_index() {
     fi
   done
   echo $service_index
-  set -x
 }
 
 is_swarm_manager()   { echo $(curl -s --unix-socket /var/run/docker.sock http::/info | jq -r .Swarm.ControlAvailable); }
@@ -79,7 +75,6 @@ get_swarm_managers() { echo $(curl -s --unix-socket /var/run/docker.sock http::/
 get_swarm_workers()  { echo $(curl -s --unix-socket /var/run/docker.sock http::/info | jq -r .Swarm.Workers);          }
 
 publish_tokens() {
-  set +x
   SERVICE_DATA=$(curl -s -u $CATTLE_ACCESS_KEY:$CATTLE_SECRET_KEY "${CATTLE_URL}/services?uuid=${SERVICE_UUID}")
   PROJECT_ID=$(echo $SERVICE_DATA | jq -r '.data[0].accountId')
   SERVICE_ID=$(echo $SERVICE_DATA | jq -r '.data[0].id')
@@ -104,13 +99,11 @@ publish_tokens() {
   else
     echo "Set swarm join-tokens"
   fi
-  set -x
 }
 
 get_label()            { curl -s "${META_URL}/self/host/labels/${1}"; }
 
 set_label() {
-  set +x
   local name=$1 value=$2
 
   HOST_DATA=$(curl -s -u $CATTLE_ACCESS_KEY:$CATTLE_SECRET_KEY "${CATTLE_URL}/hosts?uuid=${HOST_UUID}")
@@ -135,11 +128,9 @@ set_label() {
   else
     echo "Set host label $name=$value"
   fi
-  set -x
 }
 
 del_label() {
-  set +x
   local name=$1
 
   HOST_DATA=$(curl -s -u $CATTLE_ACCESS_KEY:$CATTLE_SECRET_KEY "${CATTLE_URL}/hosts?uuid=${HOST_UUID}")
@@ -164,7 +155,6 @@ del_label() {
   else
     echo "Deleted host label $name"
   fi
-  set -x
 }
 
 reconcile_label() {
@@ -180,7 +170,6 @@ reconcile_label() {
 
 # when a host is removed from a Rancher environment, remove it from the swarm
 remove_old_hosts() {
-  set +x
   nodes=$(curl -s --unix-socket /var/run/docker.sock http::/nodes)
   hosts=$(curl -s -H 'Accept:application/json' ${META_URL}/hosts)
   for hostname in $(echo $hosts | jq -r .[].hostname | cut -d. -f1); do
@@ -198,11 +187,9 @@ remove_old_hosts() {
     docker node rm $id --force
     echo Removed $id from the swarm.
   done
-  set -x
 }
 
 reconcile_node() {
-  set +x
   remove_old_hosts
 
   # get current view of swarm nodes
@@ -223,20 +210,6 @@ reconcile_node() {
 
   echo "$manager_reachable_count of $manager_count manager(s) reachable, $worker_node_count worker(s) active"
 
-  set -x
-  # conditions for not performing reconciliations
-  if [ "$manager_reachable_count" -le "$manager_unreachable_count" ]; then
-    echo "ERROR: Majority managers lost. Manual intervention required."
-    return
-  elif [ "$manager_unreachable_count" -eq "0" ] && [ "$manager_reachable_count" -ge "$MANAGER_SCALE" ]; then
-    return
-  elif [ "$worker_node_count" -eq "0" ]; then
-    echo "No active workers present for promotion, add more nodes to enable reconciliation."
-    return
-  elif [ "$node_count" -lt "$MANAGER_SCALE" ]; then
-    echo "WARNING: Only $node_count nodes available, need >= $MANAGER_SCALE nodes to acheive resiliency guarantees!"
-  fi
-
   # demote/delete an unreachable manager
   if [ "$manager_unreachable_count" -gt "0" ]; then
     manager_id=$(echo $unreachable_manager_nodes | jq -r .[0].ID)
@@ -245,12 +218,6 @@ reconcile_node() {
     echo Removed $manager_id from the swarm.
   fi
 
-  # promote a worker
-  # TODO choose the worker with lowest Rancher create_index to ensure leader is always a manager..otherwise we might elect a non-manager for reconciliation
-  worker_id=$(echo $active_worker_nodes | jq -r .[0].ID)
-  docker node promote $worker_id
-
-  set +x
   # refresh view of swarm nodes
   nodes=$(curl -s --unix-socket /var/run/docker.sock http::/nodes)
 
@@ -259,11 +226,36 @@ reconcile_node() {
     if [ "$(echo $nodes | jq 'map(select(.Status.State=="ready")) | map(select(.Description.Hostname=="$hostname")) | .[0].ID')" != "" ]; then
       id=$(echo $nodes | jq -r "map(select(.Status.State==\"down\"))  | map(select(.Description.Hostname==\"$hostname\")) | .[0].ID")
       echo $hostname has a dead node with id $id we can safely delete
+      docker node ls
       docker node demote $id
       docker node rm $id
     fi
   done
-  set -x
+
+  # conditions for not performing reconciliations
+  if [ "$manager_reachable_count" -le "$manager_unreachable_count" ]; then
+    echo "ERROR: Majority managers lost. Manual intervention required."
+    return
+  elif [ "$manager_unreachable_count" -eq "0" ] && [ "$manager_reachable_count" -eq "$MANAGER_SCALE" ]; then
+    return
+  elif [ "$worker_node_count" -eq "0" ]; then
+    echo "No active workers present for promotion, add more nodes to enable reconciliation."
+    return
+  elif [ "$node_count" -lt "$MANAGER_SCALE" ]; then
+    echo "WARNING: Only $node_count nodes available, need >= $MANAGER_SCALE nodes to acheive resiliency guarantees!"
+  fi
+
+  if   [ "$manager_reachable_count" -lt "$MANAGER_SCALE" ]; then
+    # TODO choose the worker with lowest Rancher create_index to ensure leader is always a manager..otherwise we might elect a non-manager for reconciliation
+    # promote a worker
+    worker_id=$(echo $active_worker_nodes | jq -r .[0].ID)
+    docker node promote $worker_id
+  elif [ "$manager_reachable_count" -gt "$MANAGER_SCALE" ]; then
+    # TODO choose the manager with highest Rancher create_index to ensure leader is always a manager...
+    # demote a manager
+    manager_id=$(echo $manager_reachable_count | jq -r .[0].ID)
+    docker node demote $manager_id
+  fi
 }
 
 # Bootstrap a new 1-node manager cluster
@@ -294,6 +286,7 @@ bootstrap_node() {
 }
 
 runtime_node() {
+  set_label swarm wait_leader
   # TODO For resiliency, we might want to loop through swarm=manager hosts instead of requiring the leader
   local leader_ip=$(get_leader)
   giddyup probe tcp://${leader_ip}:2377 --loop --min 1s --max 4s --backoff 2 --num 4 &> /dev/null
@@ -305,6 +298,7 @@ runtime_node() {
   should_be_manager=$(curl -s -H 'Accept:application/json' ${META_URL}/services/${SERVICE_NAME}/containers \
    | jq "sort_by(.create_index) | .[0:$MANAGER_SCALE]  | map(select(.host_uuid==\"$HOST_UUID\")) | length")
 
+  set_label swarm wait_token
   local token
   if [ "$should_be_manager" -eq "1" ]; then
     token=$(manager_token)
@@ -338,6 +332,8 @@ runtime_node() {
     set_label swarm failed
   elif [ "$should_be_manager" -eq "1" ]; then
     set_label swarm manager
+  else
+    del_label swarm
   fi
 }
 
@@ -358,8 +354,36 @@ node() {
   reconcile_label
 }
 
-giddyup health -p 2378 --check-command /opt/rancher/health.sh &
-while true; do
-  node
-  sleep 30
-done
+leave_swarm() {
+  echo Leaving old swarm
+  set_label swarm wait_leaving
+  docker swarm leave --force
+  if [ "$?" != "0" ]; then
+    set_label swarm deadlock
+    echo Deadlock trying to leave swarm. Please restart Docker daemon.
+    sleep 300
+    exit 1
+  else
+    del_label swarm
+  fi
+}
+
+main() {
+  if [ "$(local_node_state)" != "inactive" ] || [ "$(giddyup probe tcp://localhost:2377)" == "OK" ]; then
+    leave_swarm
+  fi
+
+  set_label swarm wait_healthcheck
+  while [ "$(giddyup probe tcp://localhost:2378)" == "OK" ]; do
+    sleep 3
+  done
+  giddyup health -p 2378 --check-command /opt/rancher/health.sh &
+  del_label swarm
+
+  while true; do
+    node
+    sleep 30
+  done
+}
+
+main "$@"
