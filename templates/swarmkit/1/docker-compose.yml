@@ -14,3 +14,4 @@ swarmkit-mon:
   privileged: true
   volumes:
   - /var/run/docker.sock:/var/run/docker.sock
+  - /var/lib/rancher/state:/var/lib/rancher/state
