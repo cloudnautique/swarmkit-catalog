@@ -14,19 +14,15 @@ SERVICE_NAME="swarmkit-mon"
 # This may be tuned for extra resilience - user should register at least this number of hosts
 MANAGER_SCALE=${MANAGER_SCALE:-3}
 
-AGENT_IP=$(curl -s ${META_URL}/self/host/agent_ip)
-while [ "$AGENT_IP" == "" ]; do
-  sleep 1
+update_agent_ip() {
   AGENT_IP=$(curl -s ${META_URL}/self/host/agent_ip)
-done
+  while [ "$AGENT_IP" == "" ]; do
+    sleep 1
+    AGENT_IP=$(curl -s ${META_URL}/self/host/agent_ip)
+  done
+}
 
-# check that agent IP is a private IP address
-if [ "$(echo $AGENT_IP | grep -E '^(192\.168|10\.|172\.1[6789]\.|172\.2[0-9]\.|172\.3[01]\.)')" == "" ]; then
-  echo Public Swarm not supported. Please re-register this host by setting CATTLE_AGENT_IP to a private IP address.
-  set_label swarm unsupported_config
-  exit 1
-fi
-
+update_agent_ip
 SERVICE_UUID=$(curl -s ${META_URL}/services/${SERVICE_NAME}/uuid)
 HOST_UUID=$(curl -s ${META_URL}/self/host/uuid)
 
@@ -36,17 +32,22 @@ container_svc_idx()    { echo $(curl -s ${META_URL}/services/${SERVICE_NAME}/con
 container_host_uuid()  { echo $(curl -s ${META_URL}/services/${SERVICE_NAME}/containers/${1}/host_uuid);     }
 container_ip()         { echo $(curl -s ${META_URL}/services/${SERVICE_NAME}/containers/${1}/primary_ip);    }
 
-token() {
-  token=$(curl -s ${META_URL}/services/${SERVICE_NAME}/metadata/${1})
+get_token() {
+  local token=$(curl -s ${META_URL}/services/${SERVICE_NAME}/metadata/${1})
+  echo $token
+}
+
+wait_token() {
+  local token=$(get_token $1)
   while [ "$token" == "Not found" ]; do
     sleep 1
-    token=$(curl -s ${META_URL}/services/${SERVICE_NAME}/metadata/${1})
+    token=$(get_token $1)
   done
   echo $token
 }
 
-manager_token() { echo $(token manager); }
-worker_token()  { echo $(token worker);  }
+wait_manager_token() { echo $(wait_token manager); }
+wait_worker_token()  { echo $(wait_token worker);  }
 
 get_leader() {
   local lowest_index lowest_ip
@@ -75,11 +76,12 @@ get_service_index() {
   echo $service_index
 }
 
-is_swarm_manager()   { echo $(curl -s --unix-socket /var/run/docker.sock http::/info | jq -r .Swarm.ControlAvailable); }
-local_node_state()   { echo $(curl -s --unix-socket /var/run/docker.sock http::/info | jq -r .Swarm.LocalNodeState);   }
-get_swarm_node_id()  { echo $(curl -s --unix-socket /var/run/docker.sock http::/info | jq -r .Swarm.NodeID);           }
-get_swarm_managers() { echo $(curl -s --unix-socket /var/run/docker.sock http::/info | jq -r .Swarm.Managers);         }
-get_swarm_workers()  { echo $(curl -s --unix-socket /var/run/docker.sock http::/info | jq -r .Swarm.Workers);          }
+is_swarm_manager()    { echo $(curl -s --unix-socket /var/run/docker.sock http::/info | jq -r .Swarm.ControlAvailable); }
+local_node_state()    { echo $(curl -s --unix-socket /var/run/docker.sock http::/info | jq -r .Swarm.LocalNodeState);   }
+get_swarm_node_id()   { echo $(curl -s --unix-socket /var/run/docker.sock http::/info | jq -r .Swarm.NodeID);           }
+get_swarm_node_addr() { echo $(curl -s --unix-socket /var/run/docker.sock http::/info | jq -r .Swarm.NodeAddr);         }
+get_swarm_managers()  { echo $(curl -s --unix-socket /var/run/docker.sock http::/info | jq -r .Swarm.Managers);         }
+get_swarm_workers()   { echo $(curl -s --unix-socket /var/run/docker.sock http::/info | jq -r .Swarm.Workers);          }
 
 publish_tokens() {
   SERVICE_DATA=$(curl -s -u $CATTLE_ACCESS_KEY:$CATTLE_SECRET_KEY "${CATTLE_URL}/services?uuid=${SERVICE_UUID}")
@@ -135,12 +137,12 @@ set_label() {
   new_value=$(echo $HOST_DATA_CHANGED | jq -r ".labels.$name")
   if [ "$new_value" != "$value" ]; then
     if [ "$tries" == "5" ]; then
-      echo "Failed to set host label $name=$value ($tries tries)"
+      echo "Failed to set host label $name=$value ($tries tries)"  1>&2
       exit 1
     else
-      echo "Retrying set host label $name=$value"
-      set_label $name $value $(($tries + 1))
+      echo "Retrying set host label $name=$value" 1>&2
       sleep 0.5
+      set_label $name $value $(($tries + 1))
     fi
   else
     echo "Set host label $name=$value"
@@ -281,6 +283,8 @@ bootstrap_node() {
     --listen-addr ${AGENT_IP}:2377 \
     --advertise-addr ${AGENT_IP}:2377
 
+  echo $(docker swarm join-token worker -q) > /var/lib/rancher/state/.swarm_token
+
   if [ "$?" != "0" ]; then
     set_label swarm failed
   else
@@ -303,11 +307,14 @@ runtime_node() {
    | jq "sort_by(.create_index) | .[0:$MANAGER_SCALE]  | map(select(.host_uuid==\"$HOST_UUID\")) | length")
 
   set_label swarm wait_token
+  local worker_token=$(wait_worker_token)
+  local manager_token=$(wait_manager_token)
+
   local token
   if [ "$should_be_manager" -eq "1" ]; then
-    token=$(manager_token)
+    token=$manager_token
   else
-    token=$(worker_token)
+    token=$worker_token
   fi
 
   docker swarm join \
@@ -315,6 +322,9 @@ runtime_node() {
     --listen-addr ${AGENT_IP}:2377 \
     --advertise-addr ${AGENT_IP}:2377 \
       ${leader_ip}:2377
+
+  # save state of swarm by persisting token to the host
+  echo $worker_token > /var/lib/rancher/state/.swarm_token
 
   if [ "$?" != "0" ]; then
     set_label swarm failed
@@ -326,6 +336,13 @@ runtime_node() {
 }
 
 node() {
+  update_agent_ip
+
+  # if the swarm address no longer matches the agent IP address
+  if [ "$AGENT_IP" != "$(get_swarm_node_addr)" ]; then
+    leave_swarm
+  fi
+
   if [ "$(get_leader)" == "$AGENT_IP" ]; then
 
     if [ "$(local_node_state)" == "inactive" ]; then
@@ -345,10 +362,12 @@ node() {
 leave_swarm() {
   set_label swarm wait_leaving
   echo Leaving old swarm
+
   docker swarm leave --force
+
   if [ "$?" != "0" ]; then
     set_label swarm deadlock
-    echo Deadlock trying to leave swarm. Please restart Docker daemon.
+    echo Deadlocked trying to leave swarm. Please restart Docker daemon.
     sleep 300
     exit 1
   else
@@ -357,16 +376,33 @@ leave_swarm() {
 }
 
 main() {
-  if [ "$(local_node_state)" != "inactive" ] || [ "$(giddyup probe tcp://localhost:2377)" == "OK" ]; then
-    leave_swarm
+  # check that agent IP is a private IP address
+  if [ "$(echo $AGENT_IP | grep -E '^(192\.168|10\.|172\.1[6789]\.|172\.2[0-9]\.|172\.3[01]\.)')" == "" ]; then
+    echo "Public Swarm not supported. Please re-register this host by setting CATTLE_AGENT_IP to a private IP address." 1>&2
+    set_label swarm public_unsupported
+    #FIXME uncomment
+    #exit 1
   fi
 
-  set_label swarm wait_healthcheck
+  # if host is already in a swarm
+  if [ "$(local_node_state)" != "inactive" ]; then
+    if [ -f "/var/lib/rancher/state/.swarm_token" ]; then
+      local old_token=$(cat /var/lib/rancher/state/.swarm_token)
+    fi
+    local cur_token=$(get_token worker)
+    # if host's state (token) doesn't match this stack's state (token), leave
+    if  [ "$old_token" != "$cur_token" ]; then
+      echo "    Old token: $old_token"
+      echo "Current token: $cur_token"
+      leave_swarm
+    fi
+  fi
+
+  # wait until port is available (previous stack could still be stopping)
   while [ "$(giddyup probe tcp://localhost:2378)" == "OK" ]; do
     sleep 3
   done
   giddyup health -p 2378 --check-command /opt/rancher/health.sh &
-  del_label swarm
 
   while true; do
     node
