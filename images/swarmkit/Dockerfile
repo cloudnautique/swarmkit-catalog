@@ -7,10 +7,10 @@ RUN \
 
 RUN \
   cd /tmp && \
-  curl -sfL https://get.docker.com/builds/Linux/x86_64/docker-1.12.2.tgz | tar -xzf - && \
-  cp docker/docker /usr/bin/docker-1.12.2 && \
+  curl -sfL https://get.docker.com/builds/Linux/x86_64/docker-1.12.3.tgz | tar -xzf - && \
+  cp docker/docker /usr/bin/docker-1.12.3 && \
   rm -rf docker/ && \
-  ln -fs /usr/bin/docker-1.12.2 /usr/bin/docker
+  ln -fs /usr/bin/docker-1.12.3 /usr/bin/docker
 
 WORKDIR /opt/rancher
 ENV PATH $PATH:/opt/rancher

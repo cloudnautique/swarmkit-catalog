@@ -1,65 +1,74 @@
 #!/bin/bash
 
-# Determine Docker server version
-version=$(docker version|grep Version|head -n1|cut -d: -f2|tr -d '[[:space:]]')
-
-if [ "$version" == "1.12.0" ]; then
-  echo "Docker v$version unsupported, please install v1.12.1+"
+unsupported_version() {
+  local version="v${1}"
+  echo "Docker $version is unsupported, please install v1.12.1 or later" 1>&2
   exit 1
-fi
-
-META_URL="http://rancher-metadata.rancher.internal/2015-12-19"
-SERVICE_NAME="swarmkit-mon"
-
-# This may be tuned for extra resilience - user should register at least this number of hosts
-MANAGER_SCALE=${MANAGER_SCALE:-3}
-
-update_agent_ip() {
-  AGENT_IP=$(curl -s ${META_URL}/self/host/agent_ip)
-  while [ "$AGENT_IP" == "" ]; do
-    sleep 1
-    AGENT_IP=$(curl -s ${META_URL}/self/host/agent_ip)
-  done
 }
 
-update_agent_ip
-SERVICE_UUID=$(curl -s ${META_URL}/services/${SERVICE_NAME}/uuid)
-HOST_UUID=$(curl -s ${META_URL}/self/host/uuid)
+# ensure valid Docker server version
+validate_docker_version() {
+  local version=$(docker version|grep Version|head -n1|cut -d: -f2|tr -d '[[:space:]]')
+  case "$version" in
+    1.12.0 ) unsupported_version $version;;
+    1.12.* ) ;;
+    * )      unsupported_version $version;;
+  esac
+}
+
+common() {
+  META_URL="http://rancher-metadata.rancher.internal/2015-12-19"
+  META_NOT_FOUND="Not found"
+  SERVICE_NAME="swarmkit-mon"
+  SERVICE_UUID=$(curl -s ${META_URL}/services/${SERVICE_NAME}/uuid)
+  HOST_UUID=$(curl -s ${META_URL}/self/host/uuid)
+  # This may be tuned for extra resilience - user should register at least this number of hosts
+  MANAGER_SCALE=${MANAGER_SCALE:-3}
+}
+
+# this blocks until rancher metadata is available
+update_agent_ip() {
+  while true; do
+    AGENT_IP=$(curl -s ${META_URL}/self/host/agent_ip)
+    if [ "$AGENT_IP" == "" ]; then
+      sleep 1
+      continue
+    else
+      break
+    fi
+  done
+}
 
 containers()           { echo $(curl -s ${META_URL}/services/${SERVICE_NAME}/containers);                    }
 container_create_idx() { echo $(curl -s ${META_URL}/services/${SERVICE_NAME}/containers/${1}/create_index);  }
 container_svc_idx()    { echo $(curl -s ${META_URL}/services/${SERVICE_NAME}/containers/${1}/service_index); }
 container_host_uuid()  { echo $(curl -s ${META_URL}/services/${SERVICE_NAME}/containers/${1}/host_uuid);     }
 container_ip()         { echo $(curl -s ${META_URL}/services/${SERVICE_NAME}/containers/${1}/primary_ip);    }
+metadata_value()       { echo $(curl -s ${META_URL}/services/${SERVICE_NAME}/metadata/${1});                 }
 
-get_token() {
-  local token=$(curl -s ${META_URL}/services/${SERVICE_NAME}/metadata/${1})
-  echo $token
-}
-
-wait_token() {
-  local token=$(get_token $1)
-  while [ "$token" == "Not found" ]; do
+wait_metadata_value() {
+  local metadata_key=$1
+  local token="$META_NOT_FOUND"
+  while [ "$token" == "$META_NOT_FOUND" ]; do
     sleep 1
-    token=$(get_token $1)
+    token=$(metadata_value $metadata_key)
   done
   echo $token
 }
 
-wait_manager_token() { echo $(wait_token manager); }
-wait_worker_token()  { echo $(wait_token worker);  }
+wait_manager_token() { echo $(wait_metadata_value manager); }
+wait_worker_token()  { echo $(wait_metadata_value worker);  }
 
-get_leader() {
-  local lowest_index lowest_ip
+update_leader_ip() {
+  local lowest_index
   for container in $(containers); do
     c=$(echo $container | cut -d= -f2)
     create_index=$(container_create_idx $c)
     if [ "$lowest_index" == "" ] || [ "$create_index" -lt "$lowest_index" ]; then
       lowest_index=$create_index
-      lowest_ip=$(container_ip $c)
+      LEADER_IP=$(container_ip $c)
     fi
   done
-  echo $lowest_ip
 }
 
 get_service_index() {
@@ -76,12 +85,11 @@ get_service_index() {
   echo $service_index
 }
 
-is_swarm_manager()    { echo $(curl -s --unix-socket /var/run/docker.sock http::/info | jq -r .Swarm.ControlAvailable); }
-local_node_state()    { echo $(curl -s --unix-socket /var/run/docker.sock http::/info | jq -r .Swarm.LocalNodeState);   }
-get_swarm_node_id()   { echo $(curl -s --unix-socket /var/run/docker.sock http::/info | jq -r .Swarm.NodeID);           }
-get_swarm_node_addr() { echo $(curl -s --unix-socket /var/run/docker.sock http::/info | jq -r .Swarm.NodeAddr);         }
-get_swarm_managers()  { echo $(curl -s --unix-socket /var/run/docker.sock http::/info | jq -r .Swarm.Managers);         }
-get_swarm_workers()   { echo $(curl -s --unix-socket /var/run/docker.sock http::/info | jq -r .Swarm.Workers);          }
+update_docker_nodes() { DOCKER_NODES="$(curl -s --unix-socket /var/run/docker.sock http::/nodes)"; }
+update_docker_info()  {  DOCKER_INFO="$(curl -s --unix-socket /var/run/docker.sock http::/info)";  }
+
+get_docker_nodes() { [ "$DOCKER_NODES" ] || update_docker_nodes; echo $DOCKER_NODES; }
+get_swarm_member() { echo $DOCKER_INFO | jq -r .Swarm.${1}; }
 
 publish_tokens() {
   SERVICE_DATA=$(curl -s -u $CATTLE_ACCESS_KEY:$CATTLE_SECRET_KEY "${CATTLE_URL}/services?uuid=${SERVICE_UUID}")
@@ -179,7 +187,7 @@ del_label() {
 
 reconcile_label() {
   label=$(get_label swarm)
-  manager=$(is_swarm_manager)
+  manager=$(get_swarm_member ControlAvailable)
 
   if [ "$manager" == "true" ] && [ "$label" != "manager" ]; then
     set_label swarm manager
@@ -190,7 +198,8 @@ reconcile_label() {
 
 # when a host is removed from a Rancher environment, remove it from the swarm
 remove_old_hosts() {
-  nodes=$(curl -s --unix-socket /var/run/docker.sock http::/nodes)
+  update_docker_nodes
+  nodes=$(get_docker_nodes)
   hosts=$(curl -s -H 'Accept:application/json' ${META_URL}/hosts)
   for hostname in $(echo $hosts | jq -r .[].hostname | cut -d. -f1); do
     # filter out the hostnames in Rancher metadata
@@ -213,7 +222,8 @@ reconcile_node() {
   remove_old_hosts
 
   # get current view of swarm nodes
-  nodes=$(curl -s --unix-socket /var/run/docker.sock http::/nodes)
+  update_docker_nodes
+  nodes=$(get_docker_nodes)
 
   # filter nodes based on healthy/role
   reachable_manager_nodes=$(echo $nodes | jq 'map(select(.Spec.Role == "manager")) | map(select(.ManagerStatus.Reachability == "reachable"))')
@@ -239,7 +249,8 @@ reconcile_node() {
   fi
 
   # refresh view of swarm nodes
-  nodes=$(curl -s --unix-socket /var/run/docker.sock http::/nodes)
+  update_docker_nodes
+  nodes=$(get_docker_nodes)
 
   # delete down nodes that were replaced (perhaps user manually intervened?)
   for hostname in $(echo $nodes | jq -r 'map(select(.Status.State=="down"))  | .[].Description.Hostname'); do
@@ -279,9 +290,11 @@ reconcile_node() {
 
 # Bootstrap a new 1-node manager cluster
 bootstrap_node() {
+  set -x
   docker swarm init \
     --listen-addr ${AGENT_IP}:2377 \
     --advertise-addr ${AGENT_IP}:2377
+  set +x
 
   echo $(docker swarm join-token worker -q) > /var/lib/rancher/state/.swarm_token
 
@@ -296,8 +309,7 @@ bootstrap_node() {
 runtime_node() {
   set_label swarm wait_leader
   # TODO For resiliency, we might want to loop through swarm=manager hosts instead of requiring the leader
-  local leader_ip=$(get_leader)
-  giddyup probe tcp://${leader_ip}:2377 --loop --min 1s --max 4s --backoff 2 --num 4 &> /dev/null
+  giddyup probe tcp://${LEADER_IP}:2377 --loop --min 1s --max 4s --backoff 2 --num 4 &> /dev/null
   if [ "$?" != "0" ]; then
     exit 1
   fi
@@ -317,11 +329,13 @@ runtime_node() {
     token=$worker_token
   fi
 
+  set -x
   docker swarm join \
     --token $token \
     --listen-addr ${AGENT_IP}:2377 \
     --advertise-addr ${AGENT_IP}:2377 \
-      ${leader_ip}:2377
+      ${LEADER_IP}:2377
+  set +x
 
   # save state of swarm by persisting token to the host
   echo $worker_token > /var/lib/rancher/state/.swarm_token
@@ -336,23 +350,30 @@ runtime_node() {
 }
 
 node() {
-  update_agent_ip
+  update_docker_info
+  local state=$(get_swarm_member LocalNodeState)
+  local error=$(get_swarm_member Error)
 
-  # if the swarm address no longer matches the agent IP address
-  if [ "$AGENT_IP" != "$(get_swarm_node_addr)" ]; then
+  if [ "$error" != "" ]; then
+    echo $error
     leave_swarm
   fi
+  # if the swarm address no longer matches the agent IP address
+  #if [ "$AGENT_IP" != "$(get_swarm_member NodeAddr)" ]; then
+  #  leave_swarm
+  #fi
 
-  if [ "$(get_leader)" == "$AGENT_IP" ]; then
+  update_leader_ip
+  update_agent_ip
+  if [ "$LEADER_IP" == "$AGENT_IP" ]; then
 
-    if [ "$(local_node_state)" == "inactive" ]; then
+    if [ "$state" == "inactive" ]; then
       bootstrap_node
-
     else
       reconcile_node
     fi
 
-  elif [ "$(local_node_state)" == "inactive" ]; then
+  elif [ "$state" == "inactive" ]; then
     runtime_node
   fi
   
@@ -375,23 +396,32 @@ leave_swarm() {
   fi
 }
 
-main() {
-  # check that agent IP is a private IP address
-  if [ "$(echo $AGENT_IP | grep -E '^(192\.168|10\.|172\.1[6789]\.|172\.2[0-9]\.|172\.3[01]\.)')" == "" ]; then
+# ensure agent IP is a private IP address
+validate_agent_ip() {
+  if [ -z "$(echo $AGENT_IP | grep -E '^(192\.168|10\.|172\.1[6789]\.|172\.2[0-9]\.|172\.3[01]\.)')" ]; then
     echo "Public Swarm not supported. Please re-register this host by setting CATTLE_AGENT_IP to a private IP address." 1>&2
     set_label swarm public_unsupported
-    #FIXME uncomment
-    #exit 1
-  fi
+    exit 1
+  fi  
+}
 
-  # if host is already in a swarm
-  if [ "$(local_node_state)" != "inactive" ]; then
+
+main() {
+  validate_docker_version
+  common
+  update_agent_ip
+  validate_agent_ip
+  update_docker_info
+  
+  local state=$(get_swarm_member LocalNodeState)
+  # detect if host is participating in an old swarm that doesn't match the Rancher stack
+  if [ "$state" != "inactive" ]; then
     if [ -f "/var/lib/rancher/state/.swarm_token" ]; then
       local old_token=$(cat /var/lib/rancher/state/.swarm_token)
     fi
     local cur_token=$(get_token worker)
     # if host's state (token) doesn't match this stack's state (token), leave
-    if  [ "$old_token" != "$cur_token" ]; then
+    if [ "$old_token" != "$cur_token" ]; then
       echo "    Old token: $old_token"
       echo "Current token: $cur_token"
       leave_swarm
