@@ -419,7 +419,7 @@ main() {
     if [ -f "/var/lib/rancher/state/.swarm_token" ]; then
       local old_token=$(cat /var/lib/rancher/state/.swarm_token)
     fi
-    local cur_token=$(get_token worker)
+    local cur_token=$(metadata_value worker)
     # if host's state (token) doesn't match this stack's state (token), leave
     if [ "$old_token" != "$cur_token" ]; then
       echo "    Old token: $old_token"
