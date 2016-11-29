@@ -187,6 +187,7 @@ del_label() {
 
 reconcile_label() {
   label=$(get_label swarm)
+  update_docker_info
   manager=$(get_swarm_member ControlAvailable)
 
   if [ "$manager" == "true" ] && [ "$label" != "manager" ]; then
