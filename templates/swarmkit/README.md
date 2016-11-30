@@ -1,9 +1,8 @@
 ## Prerequisites
 
-* Docker v1.12.1+
+* Docker v1.12.1 to v1.12.3
 * Port `2377` and `2378` must be open
 * Hosts are registered with `-e CATTLE_AGENT_IP=<private ip>` flag (IP address must be a system address)
-  * Not required for *Digital Ocean* servers, because the public IP address is registered as a system address
 
 ## Features
 

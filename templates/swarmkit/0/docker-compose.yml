@@ -1,8 +1,7 @@
 swarmkit-mon:
-  image: llparse/swarmkit:v1.12
+  image: rancher/swarmkit:v1.12.3
   environment:
     MANAGER_SCALE: ${MANAGER_SCALE}
-    LISTEN_INTERFACE: ${LISTEN_INTERFACE}
   labels:
     io.rancher.container.agent.role: environment
     io.rancher.container.create_agent: 'true'
@@ -14,3 +13,4 @@ swarmkit-mon:
   privileged: true
   volumes:
   - /var/run/docker.sock:/var/run/docker.sock
+  - /var/lib/rancher/state:/var/lib/rancher/state
