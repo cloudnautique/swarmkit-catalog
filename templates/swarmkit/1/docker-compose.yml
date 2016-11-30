@@ -1,5 +1,5 @@
 swarmkit-mon:
-  image: llparse/swarmkit:v1.12-5
+  image: rancher/swarmkit:v1.12.3
   environment:
     MANAGER_SCALE: ${MANAGER_SCALE}
   labels:
