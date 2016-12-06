@@ -5,12 +5,13 @@ RUN \
   curl -sfL -o /usr/bin/giddyup https://github.com/cloudnautique/giddyup/releases/download/v0.14.0/giddyup && \
   chmod +x /usr/bin/giddyup
 
+ENV DOCKER_VERSION 1.13.0-rc3
 RUN \
   cd /tmp && \
-  curl -sfL https://get.docker.com/builds/Linux/x86_64/docker-1.12.3.tgz | tar -xzf - && \
+  curl -sfL https://test.docker.com/builds/Linux/x86_64/docker-$DOCKER_VERSION.tgz | tar -xzf - && \
   cp docker/docker /usr/bin/docker && \
   rm -rf docker/ && \
-  curl -sfL https://raw.githubusercontent.com/docker/docker/v1.12.3/contrib/completion/bash/docker -o /usr/share/bash-completion/completions/docker
+  curl -sfL https://raw.githubusercontent.com/docker/docker/v$DOCKER_VERSION/contrib/completion/bash/docker -o /usr/share/bash-completion/completions/docker
 
 ENV HOME /opt/rancher
 WORKDIR $HOME

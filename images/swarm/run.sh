@@ -10,8 +10,7 @@ unsupported_version() {
 validate_docker_version() {
   local version=$(docker version|grep Version|head -n1|cut -d: -f2|tr -d '[[:space:]]')
   case "$version" in
-    1.12.0 ) unsupported_version $version;;
-    1.12.* ) ;;
+    1.13.* ) ;;
     * )      unsupported_version $version;;
   esac
 }
@@ -293,7 +292,6 @@ reconcile_node() {
 bootstrap_node() {
   set -x
   docker swarm init \
-    --listen-addr ${AGENT_IP}:2377 \
     --advertise-addr ${AGENT_IP}:2377
   set +x
 
@@ -333,7 +331,6 @@ runtime_node() {
   set -x
   docker swarm join \
     --token $token \
-    --listen-addr ${AGENT_IP}:2377 \
     --advertise-addr ${AGENT_IP}:2377 \
       ${LEADER_IP}:2377
   set +x
@@ -397,21 +394,10 @@ leave_swarm() {
   fi
 }
 
-# ensure agent IP is a private IP address
-validate_agent_ip() {
-  if [ -z "$(echo $AGENT_IP | grep -E '^(192\.168|10\.|172\.1[6789]\.|172\.2[0-9]\.|172\.3[01]\.)')" ]; then
-    echo "Public Swarm not supported. Please re-register this host by setting CATTLE_AGENT_IP to a private IP address." 1>&2
-    set_label swarm public_unsupported
-    exit 1
-  fi  
-}
-
-
 main() {
   validate_docker_version
   common
   update_agent_ip
-  validate_agent_ip
   update_docker_info
   
   local state=$(get_swarm_member LocalNodeState)
