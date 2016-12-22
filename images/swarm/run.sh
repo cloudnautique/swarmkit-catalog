@@ -1,5 +1,7 @@
 #!/bin/bash
 
+META_URL="http://rancher-metadata.rancher.internal/2015-12-19"
+
 unsupported_version() {
   local version="v${1}"
   echo "Docker $version is unsupported, please install v1.12.1 or later" 1>&2
@@ -16,7 +18,6 @@ validate_docker_version() {
 }
 
 common() {
-  META_URL="http://rancher-metadata.rancher.internal/2015-12-19"
   META_NOT_FOUND="Not found"
   SERVICE_NAME="swarmkit-mon"
   SERVICE_UUID=$(curl -s ${META_URL}/services/${SERVICE_NAME}/uuid)
@@ -27,15 +28,19 @@ common() {
 
 # this blocks until rancher metadata is available
 update_agent_ip() {
-  while true; do
+  for i in $(seq 1 60); do
     AGENT_IP=$(curl -s ${META_URL}/self/host/agent_ip)
     if [ "$AGENT_IP" == "" ]; then
+      echo "Metadata not ready"
       sleep 1
       continue
     else
       break
     fi
   done
+  if [ "$AGENT_IP" == "" ]; then
+    echo "Metadata never became available." && exit 1
+  fi
 }
 
 containers()           { echo $(curl -s ${META_URL}/services/${SERVICE_NAME}/containers);                    }
@@ -396,8 +401,8 @@ leave_swarm() {
 
 main() {
   validate_docker_version
-  common
   update_agent_ip
+  common
   update_docker_info
   
   local state=$(get_swarm_member LocalNodeState)
