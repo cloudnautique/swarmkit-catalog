@@ -4,7 +4,7 @@ META_URL="http://rancher-metadata.rancher.internal/2015-12-19"
 
 unsupported_version() {
   local version="v${1}"
-  echo "Docker $version is unsupported, please install v1.12.1 or later" 1>&2
+  echo "Docker $version is unsupported, please install v1.13.x" 1>&2
   exit 1
 }
 
