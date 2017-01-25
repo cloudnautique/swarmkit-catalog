@@ -401,6 +401,7 @@ leave_swarm() {
 
 main() {
   validate_docker_version
+  update-rancher-ssl
   update_agent_ip
   common
   update_docker_info

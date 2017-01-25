@@ -1,9 +1,13 @@
 FROM alpine:3.4
 
+ENV SSL_SCRIPT_COMMIT 98660ada3d800f653fc1f105771b5173f9d1a019
+
 RUN \
   apk add --update --no-cache curl jq bash bash-completion && \
   curl -sfL -o /usr/bin/giddyup https://github.com/cloudnautique/giddyup/releases/download/v0.14.0/giddyup && \
-  chmod +x /usr/bin/giddyup
+  chmod +x /usr/bin/giddyup && \
+  curl -sLf https://raw.githubusercontent.com/rancher/rancher/${SSL_SCRIPT_COMMIT}/server/bin/update-rancher-ssl > /usr/bin/update-rancher-ssl && \
+  chmod +x /usr/bin/update-rancher-ssl
 
 ENV DOCKER_VERSION 1.13.0-rc3
 RUN \
