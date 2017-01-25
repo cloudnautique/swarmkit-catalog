@@ -414,6 +414,7 @@ validate_agent_ip() {
 
 main() {
   validate_docker_version
+  update-rancher-ssl
   update_agent_ip
   common
   validate_agent_ip
