@@ -12,8 +12,10 @@ unsupported_version() {
 validate_docker_version() {
   local version=$(docker version|grep Version|head -n1|cut -d: -f2|tr -d '[[:space:]]')
   case "$version" in
-    1.13.* ) ;;
-    * )      unsupported_version $version;;
+    1.9.* ) ;&
+    1.10.* ) ;&
+    1.11.* ) ;&
+    1.12.* ) unsupported_version $version;;
   esac
 }
 
