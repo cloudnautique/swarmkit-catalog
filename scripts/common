@@ -1,0 +1,8 @@
+#!/bin/bash -e
+
+ACCT=${ACCT:-llparse}
+VERSION=${VERSION:-v1.13.0-beta.2}
+NAME=swarmkit
+
+IMAGE=$ACCT/$NAME:$VERSION
+APP_PATH=github.com/$ACCT/$NAME

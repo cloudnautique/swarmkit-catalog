@@ -1,8 +1,7 @@
 version: '2'
 services:
-  supervisor:
+  swarmkit:
     image: llparse/swarmkit:v1.13.0-beta.2
-    command: sleep 999999999
     environment:
       MANAGER_SCALE: ${MANAGER_SCALE}
     labels:

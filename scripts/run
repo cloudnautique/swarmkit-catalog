@@ -1,0 +1,6 @@
+#!/bin/bash -e
+
+dir="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+source $dir/common
+
+docker run --rm -it $IMAGE
