@@ -3,4 +3,9 @@
 dir="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 source $dir/common
 
-docker run --rm -it $IMAGE
+docker run \
+  --rm -it \
+  -e CATTLE_URL=$CATTLE_URL \
+  -e CATTLE_ACCESS_KEY=$CATTLE_ACCESS_KEY \
+  -e CATTLE_SECRET_KEY=$CATTLE_SECRET_KEY \
+    $IMAGE

@@ -1,6 +1,6 @@
 version: '2'
 services:
-  swarmkit:
+  supervisor:
     image: llparse/swarmkit:v1.13.0-beta.2
     environment:
       MANAGER_SCALE: ${MANAGER_SCALE}
