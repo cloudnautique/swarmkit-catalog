@@ -1,8 +1,7 @@
 ## Prerequisites
 
-* Docker v1.12.1 to v1.12.3
+* Docker 1.13 or later
 * Port `2377` and `2378` must be open
-* Hosts are registered with `-e CATTLE_AGENT_IP=<private ip>` flag (IP address must be a system address)
 
 ## Features
 
@@ -11,6 +10,3 @@
 * Configurable number of managers tunable to desired [fault tolerance](https://docs.docker.com/engine/swarm/admin_guide/#/add-manager-nodes-for-fault-tolerance)
   * Reconciliation promotes/demotes managers/workers to maintain fault tolerance
 
-## Limitations
-
-* Swarm over public networks is not supported in Docker 1.12.3 and earlier
