@@ -9,4 +9,3 @@
   * Please do not attempt to run `docker swarm` commands manually
 * Configurable number of managers tunable to desired [fault tolerance](https://docs.docker.com/engine/swarm/admin_guide/#/add-manager-nodes-for-fault-tolerance)
   * Reconciliation promotes/demotes managers/workers to maintain fault tolerance
-
