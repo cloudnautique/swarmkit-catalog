@@ -1,6 +1,4 @@
 FROM golang:1.7-alpine
 
 RUN apk add --update --no-cache git
-RUN go get github.com/Sirupsen/logrus
-RUN go get github.com/rancher/go-rancher/v2
-RUN go get github.com/rancher/rancher-docker-api-proxy
+RUN go get github.com/urfave/cli

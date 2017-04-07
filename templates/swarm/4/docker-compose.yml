@@ -2,15 +2,13 @@ version: '2'
 services:
   proxy:
     image: llparse/swarmkit:v1.13.0-beta.2
-    # command: proxy
+    command: proxy
     labels:
       io.rancher.container.agent.role: environment
       io.rancher.container.create_agent: 'true'
       io.rancher.container.pull_image: always
       io.rancher.scheduler.global: 'true'
     network_mode: host
-    ports:
-    - 2376
     privileged: true
     volumes:
     - /var/run/docker.sock:/var/run/docker.sock
@@ -21,12 +19,12 @@ services:
         max-file: '2'
   orchestrator:
     image: llparse/swarmkit:v1.13.0-beta.2
+    command: orchestrate
     environment:
       MANAGER_SCALE: ${MANAGER_SCALE}
     labels:
       io.rancher.container.agent.role: environment
       io.rancher.container.create_agent: 'true'
-      io.rancher.container.dns: 'true'
       io.rancher.container.pull_image: always
     network_mode: host
     privileged: true

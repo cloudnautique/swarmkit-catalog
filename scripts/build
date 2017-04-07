@@ -9,11 +9,11 @@ docker build -t $IMAGE-build -f Dockerfile.build .
 
 docker run \
   --rm \
-  -v $dir/../code:/usr/src/${APP_PATH} \
-  -w /usr/src/${APP_PATH} \
+  -v $dir/..:/go/src/${APP_PATH} \
+  -w /go/src/${APP_PATH} \
     $IMAGE-build \
       go build
 
 docker build -t $IMAGE .
 
-rm -f code/$NAME
+rm -f $NAME
