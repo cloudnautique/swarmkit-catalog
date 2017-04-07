@@ -8,3 +8,8 @@
     required: true
     default: 3
     type: int
+  - variable: RECONCILE_PERIOD
+    label: Reconciliation Period
+    description: Duration of time between reconciliations
+    required: true
+    default: 30s

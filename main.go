@@ -16,6 +16,7 @@ const (
 func main() {
 	app := cli.NewApp()
 	app.Name = "swarmkit"
+	app.Version = "1.0"
 	app.Usage = "swarm on rancher"
 	app.Commands = []cli.Command{
 		{
@@ -23,12 +24,33 @@ func main() {
 			Aliases: []string{"o"},
 			Usage:   "run the orchestrator",
 			Action:  orchestrate,
+			Flags: []cli.Flag{
+				cli.DurationFlag{
+					Name:   "reconcile-period",
+					Usage:  "duration of time between reconciliations",
+					EnvVar: "RECONCILE_PERIOD",
+					Value:  15 * time.Second,
+				},
+			},
 		},
 		{
 			Name:    "proxy",
 			Aliases: []string{"p"},
 			Usage:   "run the api proxy",
 			Action:  proxy,
+			Flags: []cli.Flag{
+				cli.StringFlag{
+					Name:   "host",
+					Usage:  "host id, uuid, name or hostname",
+					EnvVar: "PROXY_HOST",
+				},
+				cli.StringFlag{
+					Name:   "listen",
+					Usage:  "endpoint to listen on)",
+					EnvVar: "PROXY_BIND",
+					Value:  "tcp://0.0.0.0:32376",
+				},
+			},
 		},
 	}
 	app.Run(os.Args)

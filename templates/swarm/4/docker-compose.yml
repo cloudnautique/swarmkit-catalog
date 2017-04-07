@@ -3,6 +3,8 @@ services:
   proxy:
     image: llparse/swarmkit:v1.13.0-beta.2
     command: proxy
+    environment:
+      PROXY_BIND: "${PROXY_BIND}"
     labels:
       io.rancher.container.agent.role: environment
       io.rancher.container.create_agent: 'true'
@@ -22,6 +24,7 @@ services:
     command: orchestrate
     environment:
       MANAGER_SCALE: ${MANAGER_SCALE}
+      RECONCILE_PERIOD: ${RECONCILE_PERIOD}
     labels:
       io.rancher.container.agent.role: environment
       io.rancher.container.create_agent: 'true'

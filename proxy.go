@@ -9,6 +9,6 @@ import (
 func proxy(c *cli.Context) error {
 	log.Info("proxy()")
 	client := newRancherClient()
-	proxy := dockerapiproxy.NewProxy(client, "myhost", "tcp://0.0.0.0:32376")
+	proxy := dockerapiproxy.NewProxy(client, c.String("host"), c.String("listen"))
 	return proxy.ListenAndServe()
 }
