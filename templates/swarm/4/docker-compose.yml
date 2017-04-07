@@ -1,6 +1,25 @@
 version: '2'
 services:
-  supervisor:
+  proxy:
+    image: llparse/swarmkit:v1.13.0-beta.2
+    # command: proxy
+    labels:
+      io.rancher.container.agent.role: environment
+      io.rancher.container.create_agent: 'true'
+      io.rancher.container.pull_image: always
+      io.rancher.scheduler.global: 'true'
+    network_mode: host
+    ports:
+    - 2376
+    privileged: true
+    volumes:
+    - /var/run/docker.sock:/var/run/docker.sock
+    logging:
+      driver: json-file
+      options:
+        max-size: 25m
+        max-file: '2'
+  orchestrator:
     image: llparse/swarmkit:v1.13.0-beta.2
     environment:
       MANAGER_SCALE: ${MANAGER_SCALE}

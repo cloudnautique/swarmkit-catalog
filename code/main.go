@@ -5,7 +5,7 @@ import (
 	"time"
 
 	log "github.com/Sirupsen/logrus"
-	client "github.com/rancher/go-rancher/v2"
+	rancher "github.com/rancher/go-rancher/v2"
 )
 
 const (
@@ -21,15 +21,15 @@ func getenv(key string) string {
 	return value
 }
 
-func newClient() *client.RancherClient {
-	clientOpts := &client.ClientOpts{
+func newClient() *rancher.RancherClient {
+	clientOpts := &rancher.ClientOpts{
 		Url:       getenv("CATTLE_URL"),
 		AccessKey: getenv("CATTLE_ACCESS_KEY"),
 		SecretKey: getenv("CATTLE_SECRET_KEY"),
 		Timeout:   rancherTimeout,
 	}
 
-	c, err := client.NewRancherClient(clientOpts)
+	c, err := rancher.NewRancherClient(clientOpts)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -40,26 +40,17 @@ func main() {
 	log.Info("main()")
 	c := newClient()
 
-	if hosts, err := c.Host.List(nil); err == nil {
-		log.Info("Hostname\t\tState\tAgent IP")
-		log.Info("--------\t\t-----\t--------")
-		for _, host := range hosts.Data {
-			//f := host.Data["fields"]
-			log.Infof("%s\t%s\t%+v", host.Hostname, host.State, host.AgentIpAddress)
-			//log.Infof("%+v", host.Data)
-		}
-	}
+  t := time.NewTicker(p)
+  for _ = range t.C {
+    hosts, err := c.Host.List(nil)
+    if err != nil {
+      log.Fatal(err)
+    }
 
-	periodically(reconcilePeriod, reconcile)
-}
-
-func periodically(p time.Duration, do func()) {
-	t := time.NewTicker(p)
-	for _ = range t.C {
-		do()
-	}
-}
-
-func reconcile() {
-	log.Info("reconcile()")
+    log.Info("Hostname\t\tState\tAgent IP")
+    log.Info("--------\t\t-----\t--------")
+    for _, host := range hosts.Data {
+      log.Infof("%s\t%s\t%+v", host.Hostname, host.State, host.AgentIpAddress)
+    }
+  }
 }
