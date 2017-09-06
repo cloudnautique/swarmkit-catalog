@@ -1,19 +1,27 @@
-#!/bin/bash -e
+#!/bin/bash
+set -e
 
-dir="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-source $dir/common
+source $(dirname $0)/version
 
-cd $dir/..
+cd $(dirname $0)/..
 
-docker build -t $IMAGE-build -f Dockerfile.build .
+go_build() {
+  echo Building for os=$1 arch=$2
+  mkdir -p bin/$1/$2
+  o=bin/$1/$2/swarmkit-operator
+  if [ "$1" == "linux" ]; then
+    ldflags="-X main.VERSION=$VERSION -linkmode external -extldflags -static -s"
+  elif [ "$1" == "windows" ]; then
+    ldflags="-X main.VERSION=$VERSION -extldflags -static -s"
+  else
+    ldflags="-X main.VERSION=$VERSION"
+  fi
+  GOOS=$1 GOARCH=$2 CGO_ENABLED=0 go build -ldflags "$ldflags" -o $o
+}
 
-docker run \
-  --rm \
-  -v $dir/..:/go/src/${APP_PATH} \
-  -w /go/src/${APP_PATH} \
-    $IMAGE-build \
-      go build
-
-docker build -t $IMAGE .
-
-rm -f $NAME
+if [ "$CROSS" == "true" ]; then
+  go_build linux amd64
+  go_build windows amd64
+else
+  go_build linux amd64
+fi

@@ -10,18 +10,16 @@ import (
 )
 
 type SwarmManager struct {
-	rancher    *rancher.RancherClient
-	apiClients map[string]*dockerapiproxy.Proxy
-	hosts      []rancher.Host
-	host       string
-	listen     string
+	rancher *rancher.RancherClient
+	hosts   []rancher.Host
+	host    string
+	listen  string
 }
 
 func orchestrate(c *cli.Context) error {
 	log.Info("orchestrate()")
 	m := &SwarmManager{
 		rancher: newRancherClient(),
-		proxy:   make(map[string]*dockerapiproxy.Proxy),
 		host:    c.String("host"),
 		listen:  c.String("listen"),
 	}
@@ -43,7 +41,7 @@ func (m *SwarmManager) reconcile() error {
 	log.Info("--------\t\t-----\t--------")
 	for _, host := range hosts.Data {
 
-		proxy := dockerapiproxy.NewProxy(m.client, m.host, m.listen)
+		proxy := dockerapiproxy.NewProxy(m.rancher, m.host, m.listen)
 		return proxy.ListenAndServe()
 		log.Infof("%s\t%s\t%+v", host.Hostname, host.State, host.Id)
 	}

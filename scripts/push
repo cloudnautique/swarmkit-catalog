@@ -1,6 +1,0 @@
-#!/bin/bash -e
-
-dir="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-source $dir/common
-
-docker push $ACCT/$NAME:$VERSION
