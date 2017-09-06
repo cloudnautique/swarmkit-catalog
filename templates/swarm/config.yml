@@ -1,5 +1,5 @@
 name: SwarmKit
 description: >
   A toolkit for orchestrating distributed systems at any scale
-version: v1.13.0-rc3
+version: v17.03.1-ce
 category: Orchestration

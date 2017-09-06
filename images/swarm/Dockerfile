@@ -9,10 +9,10 @@ RUN \
   curl -sLf https://raw.githubusercontent.com/rancher/rancher/${SSL_SCRIPT_COMMIT}/server/bin/update-rancher-ssl > /usr/bin/update-rancher-ssl && \
   chmod +x /usr/bin/update-rancher-ssl
 
-ENV DOCKER_VERSION 1.13.0-rc3
+ENV DOCKER_VERSION 17.03.1-ce
 RUN \
   cd /tmp && \
-  curl -sfL https://test.docker.com/builds/Linux/x86_64/docker-$DOCKER_VERSION.tgz | tar -xzf - && \
+  curl -sfL https://download.docker.com/linux/static/stable/x86_64/docker-$DOCKER_VERSION.tgz | tar -xzf - && \
   cp docker/docker /usr/bin/docker && \
   rm -rf docker/ && \
   curl -sfL https://raw.githubusercontent.com/docker/docker/v$DOCKER_VERSION/contrib/completion/bash/docker -o /usr/share/bash-completion/completions/docker
