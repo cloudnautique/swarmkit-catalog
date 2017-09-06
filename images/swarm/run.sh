@@ -4,7 +4,7 @@ META_URL="http://rancher-metadata.rancher.internal/2015-12-19"
 
 unsupported_version() {
   local version="v${1}"
-  echo "Docker $version is unsupported, please install v1.13.x" 1>&2
+  echo "Docker $version is unsupported, please install v17.03.1-ce" 1>&2
   exit 1
 }
 
@@ -15,7 +15,8 @@ validate_docker_version() {
     1.9.* ) ;&
     1.10.* ) ;&
     1.11.* ) ;&
-    1.12.* ) unsupported_version $version;;
+    1.12.* ) ;&
+    1.13.* ) unsupported_version $version;;
   esac
 }
 
@@ -381,7 +382,7 @@ node() {
   elif [ "$state" == "inactive" ]; then
     runtime_node
   fi
-  
+
   reconcile_label
 }
 
@@ -407,7 +408,7 @@ main() {
   update_agent_ip
   common
   update_docker_info
-  
+
   local state=$(get_swarm_member LocalNodeState)
   # detect if host is participating in an old swarm that doesn't match the Rancher stack
   if [ "$state" != "inactive" ]; then
