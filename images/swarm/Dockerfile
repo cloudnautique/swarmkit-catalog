@@ -10,12 +10,13 @@ RUN \
   chmod +x /usr/bin/update-rancher-ssl
 
 ENV DOCKER_VERSION 17.03.1-ce
+ENV DOCKER_COMPOSE_VERSION 1.15.0
 RUN \
   cd /tmp && \
   curl -sfL https://download.docker.com/linux/static/stable/x86_64/docker-$DOCKER_VERSION.tgz | tar -xzf - && \
   cp docker/docker /usr/bin/docker && \
   rm -rf docker/ && \
-  curl -sfL https://raw.githubusercontent.com/docker/docker/v$DOCKER_VERSION/contrib/completion/bash/docker -o /usr/share/bash-completion/completions/docker
+  curl -sfL https://raw.githubusercontent.com/docker/compose/$DOCKER_COMPOSE_VERSION/contrib/completion/bash/docker-compose -o /usr/share/bash-completion/completions/docker
 
 ENV HOME /opt/rancher
 WORKDIR $HOME
