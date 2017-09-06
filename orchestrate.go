@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -10,41 +11,49 @@ import (
 	"github.com/urfave/cli"
 )
 
-type SwarmManager struct {
-	rancher *rancher.RancherClient
-	hosts   []rancher.Host
-}
-
-type Reconciliation struct {
+type Reconcile struct {
 	sync.Mutex
-	AllHosts       []rancher.Host
-	ReachableHosts []rancher.Host
+	client          *rancher.RancherClient
+	registeredHosts []rancher.Host
+	reachableHosts  []rancher.Host
 }
 
 func orchestrate(c *cli.Context) error {
-	log.Info("orchestrate()")
-	m := &SwarmManager{
-		rancher: newRancherClient(),
-	}
-	m.reconcile()
+	c := newRancherClient()
 	t := time.NewTicker(c.Duration("reconcile-period"))
 	for _ = range t.C {
-		m.reconcile()
+		r := &Reconcile{
+			client: c,
+		}
+		if err := r.Run(); err != nil {
+			return err
+		}
 	}
 	return nil
 }
 
-func (r *Reconciliation) Log() {
+func (r *Reconcile) Log() {
 	log.Info("Hostname\t\tState\tHost ID\tAgent IP")
 	log.Info("--------\t\t-----\t--------\t--------")
-	for _, h := range r.AllHosts {
+	for _, h := range r.registeredHosts {
 		log.Infof("%s\t%s\t%s\t%s", h.Hostname, h.State, h.Id, h.AgentIpAddress)
 	}
 }
 
-func (r *Reconciliation) FindReachable() {
+func (r *Reconcile) FindHosts() error {
+	h, err := r.client.Host.List(nil)
+	if err != nil {
+		return err
+	}
+	if len(h.Data) == 0 {
+		return errors.New("No hosts found!")
+	}
+	r.registeredHosts = h.Data
+}
+
+func (r *Reconcile) ProbeHosts() error {
 	var wg sync.WaitGroup
-	for _, h := range r.AllHosts {
+	for _, h := range r.registeredHosts {
 		wg.Add(1)
 
 		go func(h rancher.Host) {
@@ -52,13 +61,13 @@ func (r *Reconciliation) FindReachable() {
 
 			if err := ProbeTCP(address); err == nil {
 				r.Lock()
-				r.ReachableHosts = append(r.ReachableHosts, h)
+				r.reachableHosts = append(r.reachableHosts, h)
 				r.Unlock()
 			} else {
 				log.WithFields(log.Fields{
-					"address": address,
-					"error":   err.Error(),
-					"host":    h.Id,
+					"address":  address,
+					"error":    err.Error(),
+					"hostname": h.Hostname,
 				}).Warnf("Couldn't open TCP socket")
 			}
 
@@ -66,18 +75,17 @@ func (r *Reconciliation) FindReachable() {
 		}(h)
 	}
 	wg.Wait()
+
 }
 
-func (m *SwarmManager) reconcile() error {
-	h, err := m.rancher.Host.List(nil)
-	if err != nil {
-		log.Fatal(err)
+func (r *Reconcile) run() error {
+	if err := r.FindHosts(); err != nil {
+		return err
 	}
-
-	r := &Reconciliation{
-		AllHosts: h.Data,
+	if err := r.ProbeHosts(); err != nil {
+		return err
 	}
-	r.FindReachable()
+	// TODO fetch info
 	r.Log()
 
 	return nil
