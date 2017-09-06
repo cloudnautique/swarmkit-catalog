@@ -1,3 +1,3 @@
 FROM microsoft/nanoserver
-ADD swarmkit-operator.exe start.ps1 /
-CMD powershell /start.ps1
+ADD swarmkit-operator.exe /
+ENTRYPOINT ["C:\\swarmkit-operator.exe"]
