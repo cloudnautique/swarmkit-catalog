@@ -16,7 +16,9 @@ import (
 
 type Reconcile struct {
 	sync.Mutex
-	client          *rancher.RancherClient
+	client       *rancher.RancherClient
+	managerCount int
+
 	registeredHosts []rancher.Host
 	reachableHosts  []rancher.Host
 	hostClient      map[string]*client.Client
@@ -24,11 +26,12 @@ type Reconcile struct {
 	decision        string
 }
 
-func newReconciliation(c *rancher.RancherClient) *Reconcile {
+func newReconciliation(c *rancher.RancherClient, m int) *Reconcile {
 	return &Reconcile{
-		client:     c,
-		hostClient: make(map[string]*client.Client),
-		hostInfo:   make(map[string]types.Info),
+		client:       c,
+		managerCount: m,
+		hostClient:   make(map[string]*client.Client),
+		hostInfo:     make(map[string]types.Info),
 	}
 }
 
@@ -84,6 +87,27 @@ func (r *Reconcile) analyze() error {
 		r.decision = "new"
 		return nil
 	}
+
+	// Fail out if multiple swarm cluster IDs are identified
+	clusterID := ""
+	for _, h := range r.reachableHosts {
+		if i, ok := r.hostInfo[h.Id]; ok {
+			if i.Swarm.Cluster.ID != "" {
+				if clusterID != "" {
+					if clusterID != i.Swarm.Cluster.ID {
+						return errors.New(fmt.Sprintf("Multiple cluster IDs detected (%s, %s). Split-brain scenario must be manually resolved.", clusterID, i.Swarm.Cluster.ID))
+					}
+				} else {
+					clusterID = i.Swarm.Cluster.ID
+				}
+			}
+		}
+	}
+
+	// We add managers/workers iff an active swarm exists and inactive hosts
+	// exist without any questionable-state nodes
+	// for _, h := range r.reachableHosts {
+	// }
 
 	return nil
 }

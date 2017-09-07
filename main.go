@@ -31,6 +31,12 @@ func main() {
 					EnvVar: "RECONCILE_PERIOD",
 					Value:  15 * time.Second,
 				},
+				cli.IntFlag{
+					Name:   "manager-count",
+					Usage:  "maximum number of managers to elect",
+					EnvVar: "MANAGER_COUNT",
+					Value:  5,
+				},
 			},
 		},
 		{
@@ -61,7 +67,7 @@ func orchestrate(c *cli.Context) error {
 	t := time.NewTicker(c.Duration("reconcile-period"))
 
 	for _ = range t.C {
-		if err := newReconciliation(client).run(); err != nil {
+		if err := newReconciliation(client, c.Int("manager-count")).run(); err != nil {
 			log.Error(err)
 		}
 	}
