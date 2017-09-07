@@ -9,6 +9,7 @@ import (
 	log "github.com/Sirupsen/logrus"
 	"github.com/docker/docker/api"
 	"github.com/docker/docker/api/types"
+	"github.com/docker/docker/api/types/swarm"
 	"github.com/docker/docker/client"
 	rancher "github.com/rancher/go-rancher/v2"
 )
@@ -18,13 +19,16 @@ type Reconcile struct {
 	client          *rancher.RancherClient
 	registeredHosts []rancher.Host
 	reachableHosts  []rancher.Host
+	hostClient      map[string]*client.Client
 	hostInfo        map[string]types.Info
+	decision        string
 }
 
-func NewReconciliation(client *rancher.RancherClient) *Reconcile {
+func newReconciliation(c *rancher.RancherClient) *Reconcile {
 	return &Reconcile{
-		client:   client,
-		hostInfo: make(map[string]types.Info),
+		client:     c,
+		hostClient: make(map[string]*client.Client),
+		hostInfo:   make(map[string]types.Info),
 	}
 }
 
@@ -37,6 +41,11 @@ func (r *Reconcile) run() error {
 		return err
 	}
 
+	if err := r.act(); err != nil {
+		return err
+	}
+
+	// TODO get rid of this
 	r.Log()
 
 	return nil
@@ -59,7 +68,41 @@ func (r *Reconcile) observe() error {
 }
 
 func (r *Reconcile) analyze() error {
-	// TODO
+	// We create a Swarm iff info from all daemons indicates no existing Swarm
+	maybeSwarmExists := false
+	for _, h := range r.reachableHosts {
+		if i, ok := r.hostInfo[h.Id]; ok {
+			maybeSwarmExists = maybeSwarmExists || (i.Swarm.LocalNodeState != swarm.LocalNodeStateInactive)
+
+			// If we didn't get an API response, a Swarm might already exist
+		} else {
+			maybeSwarmExists = true
+			break
+		}
+	}
+	if !maybeSwarmExists {
+		r.decision = "new"
+		return nil
+	}
+
+	return nil
+}
+
+func (r *Reconcile) act() error {
+	switch r.decision {
+	case "new":
+		for _, h := range r.reachableHosts {
+			req := swarm.InitRequest{
+				AdvertiseAddr: h.AgentIpAddress,
+				ListenAddr:    "0.0.0.0:2377",
+			}
+			if resp, err := r.hostClient[h.Id].SwarmInit(context.Background(), req); err != nil {
+				return err
+			} else {
+				log.Info(resp)
+			}
+		}
+	}
 	return nil
 }
 
@@ -126,6 +169,7 @@ func (r *Reconcile) getDaemonInfo() error {
 				log.Warn(err)
 				return
 			}
+			r.hostClient[h.Id] = cli
 			r.hostInfo[h.Id] = info
 		}(h)
 	}

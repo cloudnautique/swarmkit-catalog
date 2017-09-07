@@ -62,7 +62,7 @@ func orchestrate(c *cli.Context) error {
 
 	for _ = range t.C {
 		if err := newReconciliation(client).run(); err != nil {
-			log.Fatal(err)
+			log.Error(err)
 		}
 	}
 
