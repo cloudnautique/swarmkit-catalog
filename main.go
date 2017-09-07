@@ -56,6 +56,19 @@ func main() {
 	app.Run(os.Args)
 }
 
+func orchestrate(c *cli.Context) error {
+	client := newRancherClient()
+	t := time.NewTicker(c.Duration("reconcile-period"))
+
+	for _ = range t.C {
+		if err := newReconciliation(client).run(); err != nil {
+			log.Fatal(err)
+		}
+	}
+
+	return nil
+}
+
 func getenv(key string) string {
 	value := os.Getenv(key)
 	if value == "" {
