@@ -7,7 +7,7 @@ import (
 
 const probeTimeout = 5 * time.Second
 
-func ProbeTCP(address string) error {
+func probeTCP(address string) error {
 	conn, err := net.DialTimeout("tcp", address, probeTimeout)
 	if err != nil {
 		return err

@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/rand"
 	"sync"
+	"time"
 
 	log "github.com/Sirupsen/logrus"
 	"github.com/docker/docker/api"
@@ -21,15 +23,22 @@ type Reconcile struct {
 
 	registeredHosts []rancher.Host
 	reachableHosts  []rancher.Host
-	hostClient      map[string]*client.Client
-	hostInfo        map[string]types.Info
-	decision        string
+	nodeState       map[swarm.LocalNodeState][]rancher.Host
+	managerHosts    []rancher.Host
+	workerHosts     []rancher.Host
+	managerAddrs    []string
+
+	hostClient map[string]*client.Client
+	hostInfo   map[string]types.Info
+	decision   string
+	joinTokens swarm.JoinTokens
 }
 
 func newReconciliation(c *rancher.RancherClient, m int) *Reconcile {
 	return &Reconcile{
 		client:       c,
 		managerCount: m,
+		nodeState:    make(map[swarm.LocalNodeState][]rancher.Host),
 		hostClient:   make(map[string]*client.Client),
 		hostInfo:     make(map[string]types.Info),
 	}
@@ -49,7 +58,7 @@ func (r *Reconcile) run() error {
 	}
 
 	// TODO get rid of this
-	r.Log()
+	// r.Log()
 
 	return nil
 }
@@ -71,40 +80,108 @@ func (r *Reconcile) observe() error {
 }
 
 func (r *Reconcile) analyze() error {
-	// We create a Swarm iff info from all daemons indicates no existing Swarm
-	maybeSwarmExists := false
-	for _, h := range r.reachableHosts {
-		if i, ok := r.hostInfo[h.Id]; ok {
-			maybeSwarmExists = maybeSwarmExists || (i.Swarm.LocalNodeState != swarm.LocalNodeStateInactive)
+	// TODO: In general, what should we do when certain daemons aren't reachable or communicable?
 
-			// If we didn't get an API response, a Swarm might already exist
-		} else {
-			maybeSwarmExists = true
-			break
-		}
-	}
-	if !maybeSwarmExists {
-		r.decision = "new"
-		return nil
-	}
-
-	// Fail out if multiple swarm cluster IDs are identified
 	clusterID := ""
 	for _, h := range r.reachableHosts {
 		if i, ok := r.hostInfo[h.Id]; ok {
-			if i.Swarm.Cluster.ID != "" {
-				if clusterID != "" {
-					if clusterID != i.Swarm.Cluster.ID {
-						return errors.New(fmt.Sprintf("Multiple cluster IDs detected (%s, %s). Split-brain scenario must be manually resolved.", clusterID, i.Swarm.Cluster.ID))
-					}
+			// build a map of hosts keyed by node state
+			r.nodeState[i.Swarm.LocalNodeState] = append(r.nodeState[i.Swarm.LocalNodeState], h)
+
+			// record active managers/workers
+			if i.Swarm.LocalNodeState == swarm.LocalNodeStateActive {
+				if i.Swarm.ControlAvailable {
+					r.managerHosts = append(r.managerHosts, h)
 				} else {
+					r.workerHosts = append(r.workerHosts, h)
+				}
+			}
+
+			// try to detect cluster ID
+			if i.Swarm.Cluster.ID != "" {
+				if clusterID == "" {
 					clusterID = i.Swarm.Cluster.ID
+
+					// Error out if multiple cluster IDs are identified
+				} else if clusterID != i.Swarm.Cluster.ID {
+					return errors.New(fmt.Sprintf("Multiple cluster IDs detected (%s, %s). Split-brain scenario must be manually resolved.", clusterID, i.Swarm.Cluster.ID))
 				}
 			}
 		}
 	}
 
-	// We add managers/workers iff an active swarm exists and inactive hosts
+	total := len(r.reachableHosts)
+	inactive := len(r.nodeState[swarm.LocalNodeStateInactive])
+	// pending := len(r.nodeState[swarm.LocalNodeStatePending])
+	active := len(r.nodeState[swarm.LocalNodeStateActive])
+	// error := len(r.nodeState[swarm.LocalNodeStateError])
+	// locked := len(r.nodeState[swarm.LocalNodeStateLocked])
+
+	managers := len(r.managerHosts)
+	// workers := len(r.workerHosts)
+
+	// We create a Swarm iff info from all reachable hosts indicates no existing Swarm
+	if inactive == total {
+		r.decision = "new"
+		return nil
+	}
+
+	// maybeSwarmExists := false
+	// for _, h := range r.reachableHosts {
+	// 	if i, ok := r.hostInfo[h.Id]; ok {
+	// 		maybeSwarmExists = maybeSwarmExists || (i.Swarm.LocalNodeState != swarm.LocalNodeStateInactive)
+
+	// 		// If we didn't get an API response, a Swarm might already exist
+	// 	} else {
+	// 		maybeSwarmExists = true
+	// 		break
+	// 	}
+	// }
+	// if !maybeSwarmExists {
+	// 	r.decision = "new"
+	// 	return nil
+	// }
+
+	// Fail out if multiple swarm cluster IDs are identified
+	// clusterID := ""
+	// for _, h := range r.reachableHosts {
+	// 	if i, ok := r.hostInfo[h.Id]; ok {
+	// 		if i.Swarm.Cluster.ID != "" {
+	// 			if clusterID != "" {
+	// 				if clusterID != i.Swarm.Cluster.ID {
+	// 					return errors.New(fmt.Sprintf("Multiple cluster IDs detected (%s, %s). Split-brain scenario must be manually resolved.", clusterID, i.Swarm.Cluster.ID))
+	// 				}
+	// 			} else {
+	// 				clusterID = i.Swarm.Cluster.ID
+	// 			}
+	// 		}
+	// 	}
+	// }
+
+	// We add nodes to a Swarm iff info from all daemons are inactive/active
+	if active > 0 && inactive > 0 && active+inactive == total {
+		// get join tokens
+		for _, h := range r.managerHosts {
+			if s, err := r.hostClient[h.Id].SwarmInspect(context.Background()); err == nil {
+				r.joinTokens = s.JoinTokens
+
+				for _, m := range r.hostInfo[h.Id].Swarm.RemoteManagers {
+					r.managerAddrs = append(r.managerAddrs, m.Addr)
+				}
+				break
+			}
+		}
+		// add a manager if we haven't reached desired count and have sufficient
+		// inactive hosts to achieve the next largest odd number of managers
+		if managers < r.managerCount && (managers%2 == 0 || inactive >= 2) {
+			r.decision = "add-manager"
+		} else {
+			r.decision = "add-workers"
+		}
+
+		return nil
+	}
+
 	// exist without any questionable-state nodes
 	// for _, h := range r.reachableHosts {
 	// }
@@ -113,21 +190,50 @@ func (r *Reconcile) analyze() error {
 }
 
 func (r *Reconcile) act() error {
+	rand.Seed(time.Now().UnixNano())
+
 	switch r.decision {
 	case "new":
-		for _, h := range r.reachableHosts {
-			req := swarm.InitRequest{
-				AdvertiseAddr: h.AgentIpAddress,
-				ListenAddr:    "0.0.0.0:2377",
-			}
-			if resp, err := r.hostClient[h.Id].SwarmInit(context.Background(), req); err != nil {
-				return err
-			} else {
-				log.Info(resp)
-			}
+		log.Info("Creating new Swarm cluster")
+
+		i := r.nodeState[swarm.LocalNodeStateInactive]
+		h := i[rand.Int31n(int32(len(i)))]
+
+		req := swarm.InitRequest{
+			AdvertiseAddr: h.AgentIpAddress,
+			ListenAddr:    "0.0.0.0:2377",
 		}
+
+		if id, err := r.hostClient[h.Id].SwarmInit(context.Background(), req); err != nil {
+			return err
+		} else {
+			log.WithField("node-id", id).Info("Created new cluster")
+		}
+
+	case "add-manager":
+		log.Info("Adding manager")
+		i := r.nodeState[swarm.LocalNodeStateInactive]
+		h := i[rand.Int31n(int32(len(i)))]
+		return r.addNode(h, r.joinTokens.Manager)
+
+	case "add-workers":
+		log.Info("Adding worker")
+		i := r.nodeState[swarm.LocalNodeStateInactive]
+		h := i[rand.Int31n(int32(len(i)))]
+		return r.addNode(h, r.joinTokens.Worker)
 	}
+
 	return nil
+}
+
+func (r *Reconcile) addNode(h rancher.Host, t string) error {
+	req := swarm.JoinRequest{
+		AdvertiseAddr: h.AgentIpAddress,
+		ListenAddr:    "0.0.0.0:2377",
+		JoinToken:     t,
+		RemoteAddrs:   r.managerAddrs,
+	}
+	return r.hostClient[h.Id].SwarmJoin(context.Background(), req)
 }
 
 func (r *Reconcile) findHosts() error {
@@ -151,7 +257,7 @@ func (r *Reconcile) probeDaemons() error {
 			defer wg.Done()
 			address := fmt.Sprintf("%s:%d", h.AgentIpAddress, 2375)
 
-			if err := ProbeTCP(address); err == nil {
+			if err := probeTCP(address); err == nil {
 				r.Lock()
 				r.reachableHosts = append(r.reachableHosts, h)
 				r.Unlock()
