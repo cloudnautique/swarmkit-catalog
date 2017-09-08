@@ -135,10 +135,12 @@ func (r *Reconcile) analyze() error {
 		if managers < r.managerCount && (managers%2 == 0 && workers >= 1 || workers >= 2) {
 			r.decision = "promote-worker"
 			r.getJoinTokens()
-			// TODO never go from 2 -> 1, UNSAFE OPERATION!!!!
 		} else if managers > r.managerCount {
 			r.decision = "demote-manager"
 			r.getJoinTokens()
+			if managers == 2 {
+				log.Warn("The 2->1 manager transition is unsafe!")
+			}
 		}
 
 	default:

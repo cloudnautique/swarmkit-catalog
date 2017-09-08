@@ -80,9 +80,9 @@ func orchestrate(c *cli.Context) error {
 
 	reconcilePeriod := c.Duration("reconcile-period")
 	switch {
-	case reconcilePeriod < 1 * time.Second:
+	case reconcilePeriod < 1*time.Second:
 		reconcilePeriod = 1 * time.Second
-	case reconcilePeriod > 5 * time.Minute:
+	case reconcilePeriod > 5*time.Minute:
 		reconcilePeriod = 5 * time.Minute
 	}
 	if reconcilePeriod != c.Duration("reconcile-period") {
