@@ -135,6 +135,9 @@ func (r *Reconcile) analyze() error {
 		if managers < r.managerCount && (managers%2 == 0 && workers >= 1 || workers >= 2) {
 			r.decision = "promote-worker"
 			r.getJoinTokens()
+		} else if managers > r.managerCount {
+			r.decision = "demote-manager"
+			r.getJoinTokens()
 		}
 
 	default:
@@ -178,7 +181,7 @@ func (r *Reconcile) act() error {
 		if id, err := r.hostClient[h.Id].SwarmInit(context.Background(), req); err != nil {
 			return err
 		} else {
-			log.WithField("node-id", id).Info("Created new cluster")
+			log.WithField("node-id", id).Info("New cluster manager")
 		}
 
 	case "add-manager":
@@ -210,6 +213,14 @@ func (r *Reconcile) act() error {
 			return err
 		}
 		log.Info("Promoted worker")
+
+	case "demote-manager":
+		h := r.managerHosts[rand.Int31n(int32(len(r.managerHosts)))]
+		if err := r.demoteNode(h); err != nil {
+			log.WithField("error", err.Error()).Warn("Failed to demote manager")
+			return err
+		}
+		log.Info("Demoted manager")
 	}
 
 	return nil
@@ -226,13 +237,21 @@ func (r *Reconcile) addNode(h rancher.Host, t string) error {
 }
 
 func (r *Reconcile) promoteNode(h rancher.Host) error {
+	return r.updateNodeRole(h, swarm.NodeRoleManager)
+}
+
+func (r *Reconcile) demoteNode(h rancher.Host) error {
+	return r.updateNodeRole(h, swarm.NodeRoleWorker)
+}
+
+func (r *Reconcile) updateNodeRole(h rancher.Host, role swarm.NodeRole) error {
 	var wn swarm.Node
 	var err error
 	for _, m := range r.managerHosts {
 		nodeID := r.hostInfo[h.Id].Swarm.NodeID
 
 		if wn, _, err = r.hostClient[m.Id].NodeInspectWithRaw(context.Background(), nodeID); err == nil {
-			wn.Spec.Role = swarm.NodeRoleManager
+			wn.Spec.Role = role
 			err = r.hostClient[m.Id].NodeUpdate(context.Background(), nodeID, wn.Version, wn.Spec)
 			break
 		} else {
