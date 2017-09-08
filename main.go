@@ -66,8 +66,21 @@ func orchestrate(c *cli.Context) error {
 	client := newRancherClient()
 	t := time.NewTicker(c.Duration("reconcile-period"))
 
+	managerCount := c.Int("manager-count")
+	switch {
+	case managerCount <= 0:
+		managerCount = 1
+	case managerCount > 9:
+		managerCount = 9
+	case managerCount%2 == 0:
+		managerCount += 1
+	}
+	if managerCount != c.Int("manager-count") {
+		log.Warnf("invalid manager-count (%d), using (%d)", c.Int("manager-count"), managerCount)
+	}
+
 	for _ = range t.C {
-		if err := newReconciliation(client, c.Int("manager-count")).run(); err != nil {
+		if err := newReconciliation(client, managerCount).run(); err != nil {
 			log.Error(err)
 		}
 	}
