@@ -63,21 +63,34 @@ func main() {
 }
 
 func orchestrate(c *cli.Context) error {
-	client := newRancherClient()
-	t := time.NewTicker(c.Duration("reconcile-period"))
-
 	managerCount := c.Int("manager-count")
 	switch {
 	case managerCount <= 0:
-		managerCount = 1
+		managerCount = 3
+	case managerCount == 1:
+		log.Warnf("manager-count (%d) is a single point of failure", managerCount)
 	case managerCount > 9:
 		managerCount = 9
 	case managerCount%2 == 0:
 		managerCount += 1
 	}
 	if managerCount != c.Int("manager-count") {
-		log.Warnf("invalid manager-count (%d), using (%d)", c.Int("manager-count"), managerCount)
+		log.Warnf("invalid manager-count (%d) was overridden (%d)", c.Int("manager-count"), managerCount)
 	}
+
+	reconcilePeriod := c.Duration("reconcile-period")
+	switch {
+	case reconcilePeriod < 1 * time.Second:
+		reconcilePeriod = 1 * time.Second
+	case reconcilePeriod > 5 * time.Minute:
+		reconcilePeriod = 5 * time.Minute
+	}
+	if reconcilePeriod != c.Duration("reconcile-period") {
+		log.Warnf("invalid reconcile-period (%v) was overridden (%v)", c.Duration("reconcile-period"), reconcilePeriod)
+	}
+
+	client := newRancherClient()
+	t := time.NewTicker(reconcilePeriod)
 
 	for _ = range t.C {
 		if err := newReconciliation(client, managerCount).run(); err != nil {
