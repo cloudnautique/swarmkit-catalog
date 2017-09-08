@@ -138,9 +138,9 @@ func (r *Reconcile) analyze() error {
 		} else if managers > r.managerCount {
 			r.decision = "demote-manager"
 			r.getJoinTokens()
-			if managers == 2 {
-				log.Warn("The 2->1 manager transition is unsafe!")
-			}
+		} else if managers%2 == 0 && workers == 0 {
+			r.decision = "demote-manager"
+			r.getJoinTokens()
 		}
 
 	default:
@@ -218,6 +218,9 @@ func (r *Reconcile) act() error {
 		log.Info("Promoted worker")
 
 	case "demote-manager":
+		if len(r.managerHosts) == 2 {
+			log.Warn("The 2->1 manager transition is unsafe!")
+		}
 		h := r.managerHosts[rand.Int31n(int32(len(r.managerHosts)))]
 		if err := r.demoteNode(h); err != nil {
 			log.WithField("error", err.Error()).Warn("Failed to demote manager")
