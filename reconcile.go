@@ -11,6 +11,7 @@ import (
 	log "github.com/Sirupsen/logrus"
 	"github.com/docker/docker/api"
 	"github.com/docker/docker/api/types"
+	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/api/types/swarm"
 	"github.com/docker/docker/client"
 	rancher "github.com/rancher/go-rancher/v2"
@@ -108,6 +109,7 @@ func (r *Reconcile) analyze() error {
 		}
 	}
 
+	// FIXME these numbers aren't reliable - we need to ask a manager for node status
 	total := len(r.reachableHosts)
 	inactive := len(r.nodeState[swarm.LocalNodeStateInactive])
 	pending := len(r.nodeState[swarm.LocalNodeStatePending])
@@ -185,6 +187,35 @@ func (r *Reconcile) act() error {
 			return err
 		} else {
 			log.WithField("node-id", id).Info("New cluster manager")
+		}
+		r.managerHosts = append(r.managerHosts, h)
+		fallthrough
+
+	case "create-network":
+		opts := types.NetworkCreate{
+			CheckDuplicate: true,
+			Driver:         "overlay",
+			EnableIPv6:     false,
+			IPAM: &network.IPAM{
+				Driver: "default",
+			},
+			Internal:   false,
+			Attachable: true,
+			Ingress:    false,
+		}
+
+		name := "rancher"
+		for _, h := range r.managerHosts {
+			if resp, err := r.hostClient[h.Id].NetworkCreate(context.Background(), name, opts); err != nil {
+				log.Warn(err)
+			} else {
+				log.WithFields(log.Fields{
+					"id":      resp.ID,
+					"name":    name,
+					"warning": resp.Warning,
+				}).Info("Created network")
+				break
+			}
 		}
 
 	case "add-manager":
