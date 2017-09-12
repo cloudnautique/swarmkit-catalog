@@ -1,0 +1,21 @@
+FROM golang:1.9.0
+RUN apt-get update && \
+    apt-get install -y uuid-runtime iptables
+RUN go get github.com/rancher/trash
+RUN go get github.com/golang/lint/golint
+RUN go get github.com/docker/docker/client
+RUN go get github.com/docker/docker/api
+ARG DOCKER_VERSION=17.03.0-ce
+RUN curl -sfL https://get.docker.com/builds/Linux/x86_64/docker-${DOCKER_VERSION}.tgz | tar xzf - -C /usr/bin --strip-components=1
+ENV PATH /go/bin:$PATH
+ENV DAPPER_SOURCE /go/src/github.com/rancher/swarmkit-catalog
+ENV DAPPER_OUTPUT bin dist
+ENV DAPPER_ENV TAG REPO CROSS
+ENV DAPPER_RUN_ARGS --privileged
+ENV GO15VENDOREXPERIMENT 1
+ENV TRASH_CACHE ${DAPPER_SOURCE}/.trash-cache
+WORKDIR ${DAPPER_SOURCE}
+
+VOLUME "/var/lib/docker"
+ENTRYPOINT ["./scripts/entry"]
+CMD ["ci"]
