@@ -71,10 +71,6 @@ func (r *Reconcile) observe() error {
 		return err
 	}
 
-	if err := r.probeDaemons(); err != nil {
-		return err
-	}
-
 	if err := r.getDaemonInfo(); err != nil {
 		return err
 	}
@@ -324,36 +320,6 @@ func (r *Reconcile) findHosts() error {
 		return errors.New("No hosts found!")
 	}
 	r.registeredHosts = h.Data
-	return nil
-}
-
-func (r *Reconcile) probeDaemons() error {
-	var wg sync.WaitGroup
-	for _, h := range r.registeredHosts {
-		wg.Add(1)
-
-		go func(h rancher.Host) {
-			defer wg.Done()
-			address := fmt.Sprintf("%s:%d", h.AgentIpAddress, 2375)
-
-			if err := probeTCP(address); err == nil {
-				r.Lock()
-				r.reachableHosts = append(r.reachableHosts, h)
-				r.Unlock()
-			} else {
-				log.WithFields(log.Fields{
-					"address":  address,
-					"error":    err.Error(),
-					"hostname": h.Hostname,
-				}).Warnf("Couldn't open TCP socket")
-			}
-		}(h)
-	}
-	wg.Wait()
-
-	if len(r.reachableHosts) == 0 {
-		return errors.New("No hosts with reachable Docker daemons detected!")
-	}
 	return nil
 }
 

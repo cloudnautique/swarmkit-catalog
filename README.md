@@ -11,7 +11,7 @@ SwarmKit Monitor is a cross-platform program that actively manages a Docker Swar
 
 ## Troubleshooting
 
-### Operator reports "Couldn't open TCP Socket" for one or more hosts
+### Can't connect to Docker daemon for one or more hosts
 
 This indicates that the Docker API isn't accessible to the Operator on one or more hosts. Follow the check list:
 
