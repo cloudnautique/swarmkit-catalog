@@ -46,6 +46,8 @@ func newReconciliation(c *rancher.RancherClient, m int) *Reconcile {
 }
 
 func (r *Reconcile) run() error {
+	defer r.cleanup()
+
 	if err := r.observe(); err != nil {
 		return err
 	}
@@ -264,6 +266,13 @@ func (r *Reconcile) act() error {
 	}
 
 	return nil
+}
+
+func (r *Reconcile) cleanup() {
+	// close all daemon transports
+	for _, c := range r.hostClient {
+		c.Close()
+	}
 }
 
 func (r *Reconcile) addNode(h rancher.Host, t string) error {
