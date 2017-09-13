@@ -97,7 +97,7 @@ func (r *Reconcile) analyze() error {
 			}
 
 			// try to detect cluster ID
-			if i.Swarm.Cluster.ID != "" {
+			if i.Swarm.Cluster != nil && i.Swarm.Cluster.ID != "" {
 				if clusterID == "" {
 					clusterID = i.Swarm.Cluster.ID
 
@@ -209,11 +209,14 @@ func (r *Reconcile) act() error {
 			if resp, err := r.hostClient[h.Id].NetworkCreate(context.Background(), name, opts); err != nil {
 				log.Warn(err)
 			} else {
-				log.WithFields(log.Fields{
-					"id":      resp.ID,
-					"name":    name,
-					"warning": resp.Warning,
-				}).Info("Created network")
+				f := log.Fields{
+					"id":   resp.ID,
+					"name": name,
+				}
+				if resp.Warning != "" {
+					f["warning"] = resp.Warning
+				}
+				log.WithFields(f).Info("Created network")
 				break
 			}
 		}
