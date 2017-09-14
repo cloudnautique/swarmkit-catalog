@@ -39,25 +39,6 @@ func main() {
 				},
 			},
 		},
-		{
-			Name:    "proxy",
-			Aliases: []string{"p"},
-			Usage:   "run the api proxy",
-			Action:  proxy,
-			Flags: []cli.Flag{
-				cli.StringFlag{
-					Name:   "host",
-					Usage:  "host id, uuid, name or hostname",
-					EnvVar: "PROXY_HOST",
-				},
-				cli.StringFlag{
-					Name:   "listen",
-					Usage:  "endpoint to listen on)",
-					EnvVar: "PROXY_BIND",
-					Value:  "tcp://0.0.0.0:32376",
-				},
-			},
-		},
 	}
 	app.Run(os.Args)
 }
